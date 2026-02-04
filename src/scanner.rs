@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use crate::error;
 use crate::token::Literal;
 use crate::token::Token;
@@ -10,6 +13,8 @@ struct Scanner {
     start: usize,
     current: usize,
     line: usize,
+
+    keywords: HashMap<&'static str, TokenType>,
 }
 
 impl Scanner {
@@ -20,6 +25,26 @@ impl Scanner {
             start: 0,
             current: 0,
             line: 1,
+            keywords: {
+                HashMap::from([
+                    ("and", TokenType::And),
+                    ("class", TokenType::Class),
+                    ("else", TokenType::Else),
+                    ("false", TokenType::False),
+                    ("for", TokenType::For),
+                    ("fun", TokenType::Fun),
+                    ("if", TokenType::If),
+                    ("nil", TokenType::Nil),
+                    ("or", TokenType::Or),
+                    ("print", TokenType::Print),
+                    ("return", TokenType::Return),
+                    ("super", TokenType::Super),
+                    ("this", TokenType::This),
+                    ("true", TokenType::True),
+                    ("var", TokenType::Var),
+                    ("while", TokenType::While),
+                ])
+            },
         }
     }
 
@@ -98,7 +123,10 @@ impl Scanner {
             }
             '\"' => self.string(),
             '0'..='9' => {
-                // !TODO: Number literal handling would go here.
+                self.number();
+            }
+            'A'..='Z' | 'a'..='z' | '_' => {
+                self.identifier();
             }
             _ => {
                 error(self.line, "Unexpected character");
@@ -156,5 +184,40 @@ impl Scanner {
             .iter()
             .collect();
         self.add_token(TokenType::String, Some(Literal::Str(value)));
+    }
+
+    fn number(&mut self) {
+        while self.peek().is_ascii_digit() {
+            self.advance();
+        }
+        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+            self.advance();
+            while self.peek().is_ascii_digit() {
+                self.advance();
+            }
+        }
+        let value: String = self.source[self.start..self.current].iter().collect();
+        let number_value: f64 = value.parse().unwrap();
+        self.add_token(TokenType::Number, Some(Literal::Number(number_value)));
+    }
+
+    fn peek_next(&self) -> char {
+        if self.current + 1 >= self.source.len() {
+            '\0'
+        } else {
+            self.source[self.current + 1]
+        }
+    }
+
+    fn identifier(&mut self) {
+        while self.peek().is_ascii_alphanumeric() || self.peek() == '_' {
+            self.advance();
+        }
+        let text: String = self.source[self.start..self.current].iter().collect();
+        let token_type: TokenType = match self.keywords.get(text.as_str()) {
+            Some(token_type) => token_type.clone(),
+            None => TokenType::Identifier,
+        };
+        self.add_token(token_type, None);
     }
 }
