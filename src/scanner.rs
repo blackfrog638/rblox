@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 
 use crate::error;
 use crate::token::Literal;
 use crate::token::Token;
 use crate::token_type::TokenType;
 
-struct Scanner {
+pub struct Scanner {
     source: Vec<char>,
     tokens: Vec<Token>,
 

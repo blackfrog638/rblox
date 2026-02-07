@@ -1,3 +1,4 @@
+mod expr;
 mod scanner;
 mod token;
 mod token_type;
@@ -7,8 +8,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-use token::Token;
 
 static HAD_ERROR: AtomicBool = AtomicBool::new(false);
 
@@ -63,13 +62,12 @@ fn run_prompt() -> io::Result<()> {
 }
 
 fn run(source: &str) {
-    //Scanner scanner = new Scanner(source);
-    //List<Token> tokens = scanner.scanTokens();
+    let mut scanner = scanner::Scanner::new(source);
+    let tokens = scanner.scan_tokens();
 
-    // For now, just print the tokens.
-    //for (Token token : tokens) {
-    //   System.out.println(token);
-    // }
+    for token in tokens {
+        println!("{}", token);
+    }
 }
 
 fn error(line: usize, message: &str) {

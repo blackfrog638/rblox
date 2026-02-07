@@ -36,9 +36,7 @@ impl Expr {
             Expr::Grouping { expression } => {
                 format!("(group {})", expression.to_string())
             }
-            Expr::Literal { value } => {
-                value.to_string() // 使用我们在 Token 里实现的 Display
-            }
+            Expr::Literal { value } => value.to_string(),
             Expr::Unary { operator, right } => {
                 format!("({} {})", operator.lexeme, right.to_string())
             }
