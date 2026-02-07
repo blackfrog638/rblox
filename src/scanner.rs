@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::cursor::Cursor;
 use crate::error;
 use crate::token::Literal;
 use crate::token::Token;
@@ -59,12 +60,8 @@ impl Scanner {
         &self.tokens
     }
 
-    fn is_at_end(&self) -> bool {
-        self.current >= self.source.len()
-    }
-
     fn scan_token(&mut self) {
-        let c = self.advance();
+        let c = *self.advance();
         match c {
             '(' => self.add_token(TokenType::LeftParen, None),
             ')' => self.add_token(TokenType::RightParen, None),
@@ -107,7 +104,7 @@ impl Scanner {
             '/' => {
                 if self.match_char('/') {
                     // A comment goes until the end of the line.
-                    while self.peek() != '\n' && !self.is_at_end() {
+                    while !self.is_at_end() && *self.peek() != '\n' {
                         self.advance();
                     }
                 } else {
@@ -133,24 +130,10 @@ impl Scanner {
         }
     }
 
-    fn advance(&mut self) -> char {
-        let c = self.source[self.current];
-        self.current += 1;
-        c
-    }
-
     fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) {
         let text: String = self.source[self.start..self.current].iter().collect();
         let token = Token::new(token_type, text, literal, self.line);
         self.tokens.push(token);
-    }
-
-    fn peek(&self) -> char {
-        if self.is_at_end() {
-            '\0'
-        } else {
-            self.source[self.current]
-        }
     }
 
     fn match_char(&mut self, expected: char) -> bool {
@@ -166,10 +149,10 @@ impl Scanner {
 
     fn string(&mut self) {
         loop {
-            if self.peek() == '\"' || self.is_at_end() {
+            if self.is_at_end() || *self.peek() == '\"' {
                 break;
             }
-            if self.peek() == '\n' {
+            if *self.peek() == '\n' {
                 self.line += 1;
             }
             self.advance();
@@ -186,12 +169,15 @@ impl Scanner {
     }
 
     fn number(&mut self) {
-        while self.peek().is_ascii_digit() {
+        while !self.is_at_end() && self.peek().is_ascii_digit() {
             self.advance();
         }
-        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+        if !self.is_at_end()
+            && *self.peek() == '.'
+            && matches!(self.peek_next(), Some(next) if next.is_ascii_digit())
+        {
             self.advance();
-            while self.peek().is_ascii_digit() {
+            while !self.is_at_end() && self.peek().is_ascii_digit() {
                 self.advance();
             }
         }
@@ -200,16 +186,8 @@ impl Scanner {
         self.add_token(TokenType::Number, Some(Literal::Number(number_value)));
     }
 
-    fn peek_next(&self) -> char {
-        if self.current + 1 >= self.source.len() {
-            '\0'
-        } else {
-            self.source[self.current + 1]
-        }
-    }
-
     fn identifier(&mut self) {
-        while self.peek().is_ascii_alphanumeric() || self.peek() == '_' {
+        while !self.is_at_end() && (self.peek().is_ascii_alphanumeric() || *self.peek() == '_') {
             self.advance();
         }
         let text: String = self.source[self.start..self.current].iter().collect();
@@ -218,5 +196,23 @@ impl Scanner {
             None => TokenType::Identifier,
         };
         self.add_token(token_type, None);
+    }
+}
+
+impl Cursor<char> for Scanner {
+    fn source(&self) -> &[char] {
+        &self.source
+    }
+
+    fn current(&self) -> usize {
+        self.current
+    }
+
+    fn current_mut(&mut self) -> &mut usize {
+        &mut self.current
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current >= self.source.len()
     }
 }
