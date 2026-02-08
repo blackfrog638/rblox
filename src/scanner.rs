@@ -1,10 +1,31 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::cursor::Cursor;
-use crate::error;
 use crate::token::Literal;
 use crate::token::Token;
 use crate::token_type::TokenType;
+
+#[derive(Debug)]
+pub struct ScanError {
+    line: usize,
+    message: String,
+}
+
+impl ScanError {
+    fn new(line: usize, message: &str) -> Self {
+        ScanError {
+            line,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for ScanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[line {}] Error: {}", self.line, self.message)
+    }
+}
 
 pub struct Scanner {
     source: Vec<char>,
@@ -48,22 +69,22 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Vec<Token> {
+    pub fn scan_tokens(&mut self) -> Result<Vec<Token>, ScanError> {
         loop {
             if self.is_at_end() {
                 break;
             }
 
             self.start = self.current;
-            self.scan_token();
+            self.scan_token()?;
         }
 
         self.tokens
             .push(Token::new(TokenType::EOF, String::new(), None, self.line));
-        std::mem::take(&mut self.tokens)
+        Ok(std::mem::take(&mut self.tokens))
     }
 
-    fn scan_token(&mut self) {
+    fn scan_token(&mut self) -> Result<(), ScanError> {
         let c = *self.advance();
         match c {
             '(' => self.add_token(TokenType::LeftParen, None),
@@ -120,7 +141,7 @@ impl Scanner {
             '\n' => {
                 self.line += 1;
             }
-            '\"' => self.string(),
+            '\"' => self.string()?,
             '0'..='9' => {
                 self.number();
             }
@@ -128,9 +149,10 @@ impl Scanner {
                 self.identifier();
             }
             _ => {
-                error(self.line, "Unexpected character");
+                return Err(ScanError::new(self.line, "Unexpected character"));
             }
         }
+        Ok(())
     }
 
     fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) {
@@ -150,7 +172,7 @@ impl Scanner {
         true
     }
 
-    fn string(&mut self) {
+    fn string(&mut self) -> Result<(), ScanError> {
         loop {
             if self.is_at_end() || *self.peek() == '\"' {
                 break;
@@ -161,14 +183,14 @@ impl Scanner {
             self.advance();
         }
         if self.is_at_end() {
-            error(self.line, "Unterminated string.");
-            return;
+            return Err(ScanError::new(self.line, "Unterminated string."));
         }
         self.advance();
         let value: String = self.source[self.start + 1..self.current - 1]
             .iter()
             .collect();
         self.add_token(TokenType::String, Some(Literal::Str(value)));
+        Ok(())
     }
 
     fn number(&mut self) {
