@@ -1,5 +1,5 @@
-mod expr;
 mod cursor;
+mod expr;
 mod parser;
 mod scanner;
 mod token;
@@ -66,9 +66,11 @@ fn run_prompt() -> io::Result<()> {
 fn run(source: &str) {
     let mut scanner = scanner::Scanner::new(source);
     let tokens = scanner.scan_tokens();
+    let mut parser = parser::Parser::new(tokens);
 
-    for token in tokens {
-        println!("{}", token);
+    match parser.parse() {
+        Ok(expr) => println!("{expr:#?}"),
+        Err(err) => eprintln!("Parse error: {err:#?}"),
     }
 }
 
