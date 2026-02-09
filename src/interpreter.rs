@@ -1,4 +1,5 @@
 use crate::expr::Expr;
+use crate::stmt::Stmt;
 use crate::token::Literal;
 use crate::token_type::TokenType;
 use crate::value::Value;
@@ -14,6 +15,27 @@ pub struct Interpreter;
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter
+    }
+
+    pub fn interpret(&self, statements: &[Stmt]) -> Result<(), RuntimeError> {
+        for statement in statements {
+            self.execute(statement)?;
+        }
+        Ok(())
+    }
+
+    fn execute(&self, statement: &Stmt) -> Result<(), RuntimeError> {
+        match statement {
+            Stmt::Expression { expression } => {
+                self.evaluate(expression)?;
+                Ok(())
+            }
+            Stmt::Print { expression } => {
+                let value = self.evaluate(expression)?;
+                println!("{}", value);
+                Ok(())
+            }
+        }
     }
 
     pub fn evaluate(&self, expr: &Expr) -> Result<Value, RuntimeError> {

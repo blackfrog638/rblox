@@ -63,16 +63,13 @@ impl App {
             .map_err(|err| format!("Scan error: {err}"))?;
         let mut parser = parser::Parser::new(tokens);
 
-        let expr = parser
+        let statements = parser
             .parse()
             .map_err(|err| format!("Parse error: {err:#?}"))?;
 
-        println!("{}", expr.to_string());
-        let value = self
-            .interpreter
-            .evaluate(&expr)
+        self.interpreter
+            .interpret(&statements)
             .map_err(|err| format!("Runtime error: {:?}", err))?;
-        println!("{}", value);
         Ok(())
     }
 }
