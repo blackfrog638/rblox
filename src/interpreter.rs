@@ -1,3 +1,4 @@
+use crate::environment::Environment;
 use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::token::Literal;
@@ -10,11 +11,15 @@ pub enum RuntimeError {
     ZeroDivision,
 }
 
-pub struct Interpreter;
+pub struct Interpreter {
+    environment: Environment,
+}
 
 impl Interpreter {
     pub fn new() -> Self {
-        Interpreter
+        Interpreter {
+            environment: Environment::new(),
+        }
     }
 
     pub fn interpret(&self, statements: &[Stmt]) -> Result<(), RuntimeError> {

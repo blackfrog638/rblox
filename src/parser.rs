@@ -22,9 +22,39 @@ impl Parser {
     pub fn parse(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let mut statements = Vec::new();
         while !self.is_at_end() {
+            match self.declaration() {
+                Ok(stmt) => statements.push(stmt),
+                Err(err) => {
+                    return Err(err);
+                    self.synchronize();
+                }
+            }
             statements.push(self.statement()?);
         }
         Ok(statements)
+    }
+
+    fn declaration(&mut self) -> Result<Stmt, ParseError> {
+        if self.match_token(&[TokenType::Var]) {
+            return self.var_declaration();
+        }
+        self.statement()
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+
+        let initializer = if self.match_token(&[TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+        Ok(Stmt::Var { name, initializer })
     }
 
     fn statement(&mut self) -> Result<Stmt, ParseError> {
@@ -143,6 +173,11 @@ impl Parser {
         if self.match_token(&[TokenType::Number, TokenType::String, TokenType::Identifier]) {
             let token = self.previous().clone();
             return Ok(Expr::Literal { value: token });
+        }
+        if self.match_token(&[TokenType::Identifier]) {
+            return Ok(Expr::Variable {
+                name: self.previous().clone(),
+            });
         }
         if self.match_token(&[TokenType::LeftParen]) {
             let expr = self.expression()?;

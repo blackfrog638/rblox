@@ -1,4 +1,5 @@
 mod cursor;
+mod environment;
 mod expr;
 mod interpreter;
 mod parser;

@@ -17,6 +17,9 @@ pub enum Expr {
         operator: Token,
         right: Box<Expr>,
     },
+    Variable {
+        name: Token,
+    },
 }
 
 impl Expr {
@@ -41,6 +44,7 @@ impl Expr {
             Expr::Unary { operator, right } => {
                 format!("({} {})", operator.lexeme, right.to_string())
             }
+            Expr::Variable { name } => name.lexeme.clone(),
         }
     }
 }
