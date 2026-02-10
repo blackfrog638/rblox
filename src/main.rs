@@ -25,7 +25,7 @@ impl App {
         }
     }
 
-    fn run_file(&self, path: &str) -> io::Result<()> {
+    fn run_file(&mut self, path: &str) -> io::Result<()> {
         let bytes = fs::read(path)?;
         let source = String::from_utf8_lossy(&bytes);
 
@@ -36,7 +36,7 @@ impl App {
         Ok(())
     }
 
-    fn run_prompt(&self) -> io::Result<()> {
+    fn run_prompt(&mut self) -> io::Result<()> {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
 
@@ -57,7 +57,7 @@ impl App {
         Ok(())
     }
 
-    fn run(&self, source: &str) -> Result<(), String> {
+    fn run(&mut self, source: &str) -> Result<(), String> {
         let mut scanner = scanner::Scanner::new(source);
         let tokens = scanner
             .scan_tokens()
@@ -76,7 +76,7 @@ impl App {
 }
 
 fn main() {
-    let app = App::new();
+    let mut app = App::new();
     let args: Vec<String> = env::args().collect();
 
     if args.len() > 2 {

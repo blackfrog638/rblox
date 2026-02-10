@@ -13,6 +13,10 @@ pub enum Expr {
     Literal {
         value: Token,
     },
+    Assign {
+        name: Token,
+        value: Box<Expr>,
+    },
     Unary {
         operator: Token,
         right: Box<Expr>,
@@ -41,6 +45,9 @@ impl Expr {
                 format!("(group {})", expression.to_string())
             }
             Expr::Literal { value } => value.to_string(),
+            Expr::Assign { name, value } => {
+                format!("(assign {} {})", name.lexeme, value.to_string())
+            }
             Expr::Unary { operator, right } => {
                 format!("({} {})", operator.lexeme, right.to_string())
             }

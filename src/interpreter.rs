@@ -9,6 +9,7 @@ use crate::value::Value;
 pub enum RuntimeError {
     TypeMismatch(String),
     ZeroDivision,
+    UndefinedVariable(String),
 }
 
 pub struct Interpreter {
@@ -22,14 +23,14 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&self, statements: &[Stmt]) -> Result<(), RuntimeError> {
+    pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
         for statement in statements {
             self.execute(statement)?;
         }
         Ok(())
     }
 
-    fn execute(&self, statement: &Stmt) -> Result<(), RuntimeError> {
+    fn execute(&mut self, statement: &Stmt) -> Result<(), RuntimeError> {
         match statement {
             Stmt::Expression { expression } => {
                 self.evaluate(expression)?;
@@ -40,10 +41,18 @@ impl Interpreter {
                 println!("{}", value);
                 Ok(())
             }
+            Stmt::Var { name, initializer } => {
+                let value = match initializer {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                self.environment.define(name.lexeme.clone(), value);
+                Ok(())
+            }
         }
     }
 
-    pub fn evaluate(&self, expr: &Expr) -> Result<Value, RuntimeError> {
+    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
             Expr::Binary {
                 left,
@@ -109,6 +118,18 @@ impl Interpreter {
                     _ => Err(RuntimeError::TypeMismatch("Expected literal value.".into())),
                 },
             },
+            Expr::Variable { name } => match self.environment.get(&name.lexeme) {
+                Some(value) => Ok(value.clone()),
+                None => Err(RuntimeError::UndefinedVariable(name.lexeme.clone())),
+            },
+            Expr::Assign { name, value } => {
+                let evaluated = self.evaluate(value)?;
+                if self.environment.assign(&name.lexeme, evaluated.clone()) {
+                    Ok(evaluated)
+                } else {
+                    Err(RuntimeError::UndefinedVariable(name.lexeme.clone()))
+                }
+            }
             Expr::Unary { operator, right } => {
                 let right_value = self.evaluate(right)?;
                 match operator.token_type {
