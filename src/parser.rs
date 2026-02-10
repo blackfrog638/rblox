@@ -29,7 +29,6 @@ impl Parser {
                     self.synchronize();
                 }
             }
-            statements.push(self.statement()?);
         }
         Ok(statements)
     }

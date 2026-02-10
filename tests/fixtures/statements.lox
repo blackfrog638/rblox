@@ -1,0 +1,25 @@
+// Variables, assignment, arithmetic.
+var a = 1;
+a = a + 2;
+print a; // 3
+
+// String concatenation.
+var s = "hi";
+s = s + "!";
+print s; // hi!
+
+// Comparisons and equality.
+var gt = 3 > 2;
+var lt = 3 < 2;
+var eq = 3 == 3;
+var neq = 3 != 3;
+print gt; // true
+print lt; // false
+print eq; // true
+print neq; // false
+
+// Nil and boolean.
+var n;
+print n; // nil
+var bang = !false;
+print bang; // true
