@@ -10,6 +10,9 @@ pub enum Stmt {
     Print {
         expression: Expr,
     },
+    Block {
+        statements: Vec<Stmt>,
+    },
     Var {
         name: Token,
         initializer: Option<Expr>,

@@ -23,3 +23,9 @@ var n;
 print n; // nil
 var bang = !false;
 print bang; // true
+
+// Block scope should not leak.
+var scoped = "outer";
+{
+	var scoped = "inner";
+}

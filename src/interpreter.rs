@@ -4,6 +4,8 @@ use crate::stmt::Stmt;
 use crate::token::Literal;
 use crate::token_type::TokenType;
 use crate::value::Value;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -13,13 +15,13 @@ pub enum RuntimeError {
 }
 
 pub struct Interpreter {
-    environment: Environment,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            environment: Environment::new(),
+            environment: Rc::new(RefCell::new(Environment::new())),
         }
     }
 
@@ -41,15 +43,39 @@ impl Interpreter {
                 println!("{}", value);
                 Ok(())
             }
+            Stmt::Block { statements } => {
+                let new_environment = Rc::new(RefCell::new(Environment::new_enclosed(
+                    self.environment.clone(),
+                )));
+                self.execute_block(statements, new_environment)
+            }
             Stmt::Var { name, initializer } => {
                 let value = match initializer {
                     Some(expr) => self.evaluate(expr)?,
                     None => Value::Nil,
                 };
-                self.environment.define(name.lexeme.clone(), value);
+                self.environment
+                    .borrow_mut()
+                    .define(name.lexeme.clone(), value);
                 Ok(())
             }
         }
+    }
+
+    fn execute_block(
+        &mut self,
+        statements: &[Stmt],
+        environment: Rc<RefCell<Environment>>,
+    ) -> Result<(), RuntimeError> {
+        let previous = self.environment.clone();
+        self.environment = environment;
+
+        let result = statements
+            .iter()
+            .try_for_each(|statement| self.execute(statement));
+
+        self.environment = previous;
+        result
     }
 
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
@@ -118,13 +144,17 @@ impl Interpreter {
                     _ => Err(RuntimeError::TypeMismatch("Expected literal value.".into())),
                 },
             },
-            Expr::Variable { name } => match self.environment.get(&name.lexeme) {
-                Some(value) => Ok(value.clone()),
+            Expr::Variable { name } => match self.environment.borrow().get(&name.lexeme) {
+                Some(value) => Ok(value),
                 None => Err(RuntimeError::UndefinedVariable(name.lexeme.clone())),
             },
             Expr::Assign { name, value } => {
                 let evaluated = self.evaluate(value)?;
-                if self.environment.assign(&name.lexeme, evaluated.clone()) {
+                if self
+                    .environment
+                    .borrow_mut()
+                    .assign(&name.lexeme, evaluated.clone())
+                {
                     Ok(evaluated)
                 } else {
                     Err(RuntimeError::UndefinedVariable(name.lexeme.clone()))

@@ -69,4 +69,11 @@ fn interprets_statements_fixture() {
         })
         .expect("bang should exist");
     assert_eq!(bang, Value::Boolean(true));
+
+    let scoped = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("scoped"),
+        })
+        .expect("scoped should exist");
+    assert_eq!(scoped, Value::Str("outer".to_string()));
 }
