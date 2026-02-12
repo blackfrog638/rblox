@@ -111,4 +111,9 @@ fn interprets_statements_fixture() {
         })
         .expect("and_short should exist");
     assert_eq!(and_short, Value::Boolean(false));
+
+    let sum = interpreter
+        .evaluate(&Expr::Variable { name: ident("sum") })
+        .expect("sum should exist");
+    assert_eq!(sum, Value::Number(3.0));
 }

@@ -40,3 +40,9 @@ var and_value = t and f;
 var side = 0;
 var or_short = true or (side = 1);
 var and_short = false and (side = 2);
+
+// For loop desugaring.
+var sum = 0;
+for (var i = 0; i < 3; i = i + 1) {
+	sum = sum + i;
+}
