@@ -59,6 +59,20 @@ impl Interpreter {
                     .define(name.lexeme.clone(), value);
                 Ok(())
             }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let condition_value = self.evaluate(condition)?;
+                if condition_value.is_truthy() {
+                    self.execute(then_branch)
+                } else if let Some(else_branch) = else_branch {
+                    self.execute(else_branch)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
