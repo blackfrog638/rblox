@@ -158,6 +158,31 @@ impl Interpreter {
                     _ => Err(RuntimeError::TypeMismatch("Expected literal value.".into())),
                 },
             },
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left_value = self.evaluate(left)?;
+
+                match operator.token_type {
+                    TokenType::Or => {
+                        if left_value.is_truthy() {
+                            Ok(left_value)
+                        } else {
+                            self.evaluate(right)
+                        }
+                    }
+                    TokenType::And => {
+                        if !left_value.is_truthy() {
+                            Ok(left_value)
+                        } else {
+                            self.evaluate(right)
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Expr::Variable { name } => match self.environment.borrow().get(&name.lexeme) {
                 Some(value) => Ok(value),
                 None => Err(RuntimeError::UndefinedVariable(name.lexeme.clone())),

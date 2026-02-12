@@ -76,4 +76,39 @@ fn interprets_statements_fixture() {
         })
         .expect("scoped should exist");
     assert_eq!(scoped, Value::Str("outer".to_string()));
+
+    let or_value = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("or_value"),
+        })
+        .expect("or_value should exist");
+    assert_eq!(or_value, Value::Boolean(true));
+
+    let and_value = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("and_value"),
+        })
+        .expect("and_value should exist");
+    assert_eq!(and_value, Value::Boolean(false));
+
+    let side = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("side"),
+        })
+        .expect("side should exist");
+    assert_eq!(side, Value::Number(0.0));
+
+    let or_short = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("or_short"),
+        })
+        .expect("or_short should exist");
+    assert_eq!(or_short, Value::Boolean(true));
+
+    let and_short = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("and_short"),
+        })
+        .expect("and_short should exist");
+    assert_eq!(and_short, Value::Boolean(false));
 }

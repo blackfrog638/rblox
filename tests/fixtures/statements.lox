@@ -29,3 +29,14 @@ var scoped = "outer";
 {
 	var scoped = "inner";
 }
+
+// Logical operators.
+var t = true;
+var f = false;
+var or_value = t or f;
+var and_value = t and f;
+
+// Short-circuit side effects.
+var side = 0;
+var or_short = true or (side = 1);
+var and_short = false and (side = 2);
