@@ -116,4 +116,12 @@ fn interprets_statements_fixture() {
         .evaluate(&Expr::Variable { name: ident("sum") })
         .expect("sum should exist");
     assert_eq!(sum, Value::Number(3.0));
+
+    let t0 = interpreter
+        .evaluate(&Expr::Variable { name: ident("t0") })
+        .expect("t0 should exist");
+    match t0 {
+        Value::Number(_) => {}
+        other => panic!("expected number, got {:?}", other),
+    }
 }

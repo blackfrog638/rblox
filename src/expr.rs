@@ -29,6 +29,11 @@ pub enum Expr {
     Variable {
         name: Token,
     },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: Vec<Expr>,
+    },
 }
 
 impl Expr {
@@ -69,6 +74,18 @@ impl Expr {
                 format!("({} {})", operator.lexeme, right.to_string())
             }
             Expr::Variable { name } => name.lexeme.clone(),
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let args = arguments
+                    .iter()
+                    .map(|arg| arg.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("(call {} {})", callee.to_string(), args)
+            }
         }
     }
 }

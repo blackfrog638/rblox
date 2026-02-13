@@ -1,5 +1,6 @@
 use crate::environment::Environment;
 use crate::expr::Expr;
+use crate::lox_callable::NativeClock;
 use crate::stmt::Stmt;
 use crate::token::Literal;
 use crate::token_type::TokenType;
@@ -20,9 +21,11 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
-        Interpreter {
-            environment: Rc::new(RefCell::new(Environment::new())),
-        }
+        let environment = Rc::new(RefCell::new(Environment::new()));
+        environment
+            .borrow_mut()
+            .define("clock".to_string(), Value::Callable(Rc::new(NativeClock)));
+        Interpreter { environment }
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
@@ -216,6 +219,35 @@ impl Interpreter {
                     },
                     TokenType::Bang => Ok(Value::Boolean(!right_value.is_truthy())),
                     _ => unreachable!(),
+                }
+            }
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let callee_value = self.evaluate(callee)?;
+
+                let mut evaluated_args = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    evaluated_args.push(self.evaluate(argument)?);
+                }
+
+                match callee_value {
+                    Value::Callable(callable) => {
+                        let expected = callable.arity();
+                        let got = evaluated_args.len();
+                        if expected != got {
+                            return Err(RuntimeError::TypeMismatch(format!(
+                                "Expected {} arguments but got {}.",
+                                expected, got
+                            )));
+                        }
+                        callable.call(self, evaluated_args)
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Can only call functions and classes.".into(),
+                    )),
                 }
             }
         }
