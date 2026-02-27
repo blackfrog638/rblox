@@ -49,3 +49,21 @@ for (var i = 0; i < 3; i = i + 1) {
 
 // Native function call.
 var t0 = clock();
+
+// Function declaration and return.
+fun add(x, y) {
+  return x + y;
+}
+var add_result = add(1, 2);
+
+// Implicit nil return.
+fun nothing() {
+}
+var nil_result = nothing();
+
+// Recursion.
+fun fib(n) {
+  if (n <= 1) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+var fib_result = fib(6);

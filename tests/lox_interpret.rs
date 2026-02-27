@@ -124,4 +124,19 @@ fn interprets_statements_fixture() {
         Value::Number(_) => {}
         other => panic!("expected number, got {:?}", other),
     }
+
+    let add_result = interpreter
+        .evaluate(&Expr::Variable { name: ident("add_result") })
+        .expect("add_result should exist");
+    assert_eq!(add_result, Value::Number(3.0));
+
+    let nil_result = interpreter
+        .evaluate(&Expr::Variable { name: ident("nil_result") })
+        .expect("nil_result should exist");
+    assert_eq!(nil_result, Value::Nil);
+
+    let fib_result = interpreter
+        .evaluate(&Expr::Variable { name: ident("fib_result") })
+        .expect("fib_result should exist");
+    assert_eq!(fib_result, Value::Number(8.0));
 }

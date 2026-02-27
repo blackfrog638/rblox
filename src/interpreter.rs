@@ -8,11 +8,14 @@ use crate::value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::lox_callable::LoxFunction;
+
 #[derive(Debug)]
 pub enum RuntimeError {
     TypeMismatch(String),
     ZeroDivision,
     UndefinedVariable(String),
+    ReturnValue(Value),
 }
 
 pub struct Interpreter {
@@ -82,10 +85,29 @@ impl Interpreter {
                 }
                 Ok(())
             }
+            Stmt::Function { name, params, body } => {
+                let function = LoxFunction::new(
+                    name.lexeme.clone(),
+                    params.clone(),
+                    body.clone(),
+                    self.environment.clone(),
+                );
+                self.environment
+                    .borrow_mut()
+                    .define(name.lexeme.clone(), Value::Callable(Rc::new(function)));
+                Ok(())
+            }
+            Stmt::Return { keyword: _, value } => {
+                let return_value = match value {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                Err(RuntimeError::ReturnValue(return_value))
+            }
         }
     }
 
-    fn execute_block(
+    pub fn execute_block(
         &mut self,
         statements: &[Stmt],
         environment: Rc<RefCell<Environment>>,
@@ -134,8 +156,14 @@ impl Interpreter {
                     (Value::Number(n1), TokenType::Greater, Value::Number(n2)) => {
                         Ok(Value::Boolean(n1 > n2))
                     }
+                    (Value::Number(n1), TokenType::GreaterEqual, Value::Number(n2)) => {
+                        Ok(Value::Boolean(n1 >= n2))
+                    }
                     (Value::Number(n1), TokenType::Less, Value::Number(n2)) => {
                         Ok(Value::Boolean(n1 < n2))
+                    }
+                    (Value::Number(n1), TokenType::LessEqual, Value::Number(n2)) => {
+                        Ok(Value::Boolean(n1 <= n2))
                     }
 
                     (v1, TokenType::EqualEqual, v2) => Ok(Value::Boolean(v1 == v2)),

@@ -2,7 +2,7 @@
 use crate::expr::Expr;
 use crate::token::Token;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Expression {
         expression: Expr,
@@ -25,5 +25,14 @@ pub enum Stmt {
     While {
         condition: Expr,
         body: Box<Stmt>,
+    },
+    Function {
+        name: Token,
+        params: Vec<Token>,
+        body: Vec<Stmt>,
+    },
+    Return {
+        keyword: Token,
+        value: Option<Expr>,
     },
 }

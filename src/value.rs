@@ -18,7 +18,7 @@ impl fmt::Debug for Value {
             Value::Str(value) => write!(f, "Str({:?})", value),
             Value::Boolean(value) => write!(f, "Boolean({})", value),
             Value::Nil => write!(f, "Nil"),
-            Value::Callable(_) => write!(f, "Callable(<dyn LoxCallable>)"),
+            Value::Callable(c) => write!(f, "Callable(<fn {}>)", c.name()),
         }
     }
 }
@@ -53,7 +53,7 @@ impl fmt::Display for Value {
             Value::Str(value) => write!(f, "{}", value),
             Value::Boolean(value) => write!(f, "{}", value),
             Value::Nil => write!(f, "nil"),
-            Value::Callable(_) => write!(f, "<callable>"),
+            Value::Callable(c) => write!(f, "<fn {}>", c.name()),
         }
     }
 }
