@@ -126,17 +126,60 @@ fn interprets_statements_fixture() {
     }
 
     let add_result = interpreter
-        .evaluate(&Expr::Variable { name: ident("add_result") })
+        .evaluate(&Expr::Variable {
+            name: ident("add_result"),
+        })
         .expect("add_result should exist");
     assert_eq!(add_result, Value::Number(3.0));
 
     let nil_result = interpreter
-        .evaluate(&Expr::Variable { name: ident("nil_result") })
+        .evaluate(&Expr::Variable {
+            name: ident("nil_result"),
+        })
         .expect("nil_result should exist");
     assert_eq!(nil_result, Value::Nil);
 
     let fib_result = interpreter
-        .evaluate(&Expr::Variable { name: ident("fib_result") })
+        .evaluate(&Expr::Variable {
+            name: ident("fib_result"),
+        })
         .expect("fib_result should exist");
     assert_eq!(fib_result, Value::Number(8.0));
+
+    let c1 = interpreter
+        .evaluate(&Expr::Variable { name: ident("c1") })
+        .expect("c1 should exist");
+    assert_eq!(c1, Value::Number(1.0));
+
+    let c2 = interpreter
+        .evaluate(&Expr::Variable { name: ident("c2") })
+        .expect("c2 should exist");
+    assert_eq!(c2, Value::Number(2.0));
+
+    let c3 = interpreter
+        .evaluate(&Expr::Variable { name: ident("c3") })
+        .expect("c3 should exist");
+    assert_eq!(c3, Value::Number(3.0));
+
+    // Independent closure starts from 0 again.
+    let b1 = interpreter
+        .evaluate(&Expr::Variable { name: ident("b1") })
+        .expect("b1 should exist");
+    assert_eq!(b1, Value::Number(1.0));
+
+    // Closure over parameter.
+    let adder_result = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("adder_result"),
+        })
+        .expect("adder_result should exist");
+    assert_eq!(adder_result, Value::Number(8.0));
+
+    // Closure reads updated variable (late binding).
+    let late_result = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("late_result"),
+        })
+        .expect("late_result should exist");
+    assert_eq!(late_result, Value::Str("after".to_string()));
 }

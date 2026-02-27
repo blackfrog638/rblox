@@ -67,3 +67,45 @@ fun fib(n) {
   return fib(n - 1) + fib(n - 2);
 }
 var fib_result = fib(6);
+
+// --- Closures ---
+
+// 1. Closure captures enclosing variable.
+fun makeCounter() {
+  var i = 0;
+  fun count() {
+    i = i + 1;
+    return i;
+  }
+  return count;
+}
+var counter = makeCounter();
+var c1 = counter();
+var c2 = counter();
+var c3 = counter();
+
+// 2. Two independent closures over same factory.
+var counterB = makeCounter();
+var b1 = counterB();
+
+// 3. Closure over parameter.
+fun makeAdder(x) {
+  fun adder(y) {
+    return x + y;
+  }
+  return adder;
+}
+var add5 = makeAdder(5);
+var adder_result = add5(3);
+
+// 4. Closure reads updated variable (late binding).
+var closure_late;
+{
+  var captured = "before";
+  fun reader() {
+    return captured;
+  }
+  closure_late = reader;
+  captured = "after";
+}
+var late_result = closure_late();
