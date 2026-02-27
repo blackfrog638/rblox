@@ -44,10 +44,7 @@ impl Parser {
     }
 
     fn function(&mut self, kind: &str) -> Result<Stmt, ParseError> {
-        let name = self.consume(
-            TokenType::Identifier,
-            &format!("Expect {} name.", kind),
-        )?;
+        let name = self.consume(TokenType::Identifier, &format!("Expect {} name.", kind))?;
         self.consume(
             TokenType::LeftParen,
             &format!("Expect '(' after {} name.", kind),
