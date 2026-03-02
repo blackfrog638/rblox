@@ -3,9 +3,11 @@ use crate::expr::Expr;
 use crate::lox_callable::NativeClock;
 use crate::stmt::Stmt;
 use crate::token::Literal;
+use crate::token::Token;
 use crate::token_type::TokenType;
 use crate::value::Value;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::lox_callable::LoxFunction;
@@ -20,6 +22,7 @@ pub enum RuntimeError {
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
+    locals: HashMap<usize, usize>,
 }
 
 impl Interpreter {
@@ -28,7 +31,10 @@ impl Interpreter {
         environment
             .borrow_mut()
             .define("clock".to_string(), Value::Callable(Rc::new(NativeClock)));
-        Interpreter { environment }
+        Interpreter {
+            environment,
+            locals: HashMap::new(),
+        }
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
@@ -124,6 +130,7 @@ impl Interpreter {
     }
 
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
+        let expr_ptr = expr as *const Expr as usize;
         match expr {
             Expr::Binary {
                 left,
@@ -220,13 +227,20 @@ impl Interpreter {
                     _ => unreachable!(),
                 }
             }
-            Expr::Variable { name } => match self.environment.borrow().get(&name.lexeme) {
-                Some(value) => Ok(value),
-                None => Err(RuntimeError::UndefinedVariable(name.lexeme.clone())),
-            },
+            Expr::Variable { name } => self.lookup_variable(name, expr_ptr),
             Expr::Assign { name, value } => {
                 let evaluated = self.evaluate(value)?;
-                if self
+                if let Some(distance) = self.locals.get(&expr_ptr) {
+                    if self.environment.borrow_mut().assign_at(
+                        *distance,
+                        &name.lexeme,
+                        evaluated.clone(),
+                    ) {
+                        Ok(evaluated)
+                    } else {
+                        Err(RuntimeError::UndefinedVariable(name.lexeme.clone()))
+                    }
+                } else if self
                     .environment
                     .borrow_mut()
                     .assign(&name.lexeme, evaluated.clone())
@@ -278,6 +292,25 @@ impl Interpreter {
                     )),
                 }
             }
+        }
+    }
+
+    pub fn resolve(&mut self, expr: &Expr, depth: usize) {
+        let expr_ptr = expr as *const Expr as usize;
+        self.locals.insert(expr_ptr, depth);
+    }
+
+    fn lookup_variable(&self, name: &Token, expr_ptr: usize) -> Result<Value, RuntimeError> {
+        if let Some(distance) = self.locals.get(&expr_ptr) {
+            self.environment
+                .borrow()
+                .get_at(*distance, &name.lexeme)
+                .ok_or_else(|| RuntimeError::UndefinedVariable(name.lexeme.clone()))
+        } else {
+            self.environment
+                .borrow()
+                .get(&name.lexeme)
+                .ok_or_else(|| RuntimeError::UndefinedVariable(name.lexeme.clone()))
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
+use crate::resolver::Resolver;
 use crate::scanner::Scanner;
 use std::fs;
 use std::io::{self, Write};
@@ -57,6 +58,11 @@ impl App {
         let statements = parser
             .parse()
             .map_err(|err| format!("Parse error: {err:#?}"))?;
+
+        let mut resolver = Resolver::new(self.interpreter_mut());
+        resolver
+            .resolve_statements(&statements)
+            .map_err(|err| format!("Resolve error: {err}"))?;
 
         self.interpreter
             .interpret(&statements)

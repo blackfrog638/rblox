@@ -47,4 +47,29 @@ impl Environment {
             false
         }
     }
+
+    pub fn get_at(&self, distance: usize, name: &str) -> Option<Value> {
+        if distance == 0 {
+            self.values.get(name).cloned()
+        } else if let Some(enclosing) = &self.enclosing {
+            enclosing.borrow().get_at(distance - 1, name)
+        } else {
+            None
+        }
+    }
+
+    pub fn assign_at(&mut self, distance: usize, name: &str, value: Value) -> bool {
+        if distance == 0 {
+            if let Some(slot) = self.values.get_mut(name) {
+                *slot = value;
+                true
+            } else {
+                false
+            }
+        } else if let Some(enclosing) = &self.enclosing {
+            enclosing.borrow_mut().assign_at(distance - 1, name, value)
+        } else {
+            false
+        }
+    }
 }
