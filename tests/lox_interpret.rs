@@ -183,3 +183,59 @@ fn interprets_statements_fixture() {
         .expect("late_result should exist");
     assert_eq!(late_result, Value::Str("after".to_string()));
 }
+
+#[test]
+fn supports_static_methods_on_class_object() {
+    let source = r#"
+class Math {
+    class add(a, b) {
+        return a + b;
+    }
+
+    twice(n) {
+        return n * 2;
+    }
+}
+
+var static_sum = Math.add(3, 4);
+var instance_twice = Math().twice(5);
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let static_sum = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("static_sum"),
+        })
+        .expect("static_sum should exist");
+    assert_eq!(static_sum, Value::Number(7.0));
+
+    let instance_twice = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("instance_twice"),
+        })
+        .expect("instance_twice should exist");
+    assert_eq!(instance_twice, Value::Number(10.0));
+}
+
+#[test]
+fn static_method_is_not_available_on_instance() {
+    let source = r#"
+class Tools {
+    class ping() {
+        return 1;
+    }
+}
+
+var inst = Tools();
+inst.ping();
+"#;
+
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    assert!(
+        err.contains("UndefinedProperty(\"ping\")"),
+        "unexpected error: {err}"
+    );
+}
