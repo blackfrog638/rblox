@@ -17,6 +17,9 @@ pub enum Stmt {
         name: Token,
         initializer: Option<Expr>,
     },
+    Class {
+        name: Token,
+    },
     If {
         condition: Expr,
         then_branch: Box<Stmt>,

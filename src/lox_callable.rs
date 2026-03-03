@@ -4,6 +4,7 @@ use crate::stmt::Stmt;
 use crate::token::Token;
 use crate::value::Value;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -98,5 +99,64 @@ impl LoxCallable for LoxFunction {
 impl fmt::Display for LoxFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<fn {}>", self.declaration_name)
+    }
+}
+
+// --- Classes and instances ---
+
+#[derive(Clone)]
+pub struct LoxClass {
+    pub name: String,
+}
+
+impl LoxClass {
+    pub fn new(name: String) -> Self {
+        LoxClass { name }
+    }
+}
+
+impl LoxCallable for LoxClass {
+    fn arity(&self) -> usize {
+        0
+    }
+
+    fn call(
+        &self,
+        _interpreter: &mut Interpreter,
+        _arguments: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let class = Rc::new(self.clone());
+        let instance = LoxInstance::new(class);
+        Ok(Value::Instance(Rc::new(RefCell::new(instance))))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+pub struct LoxInstance {
+    class: Rc<LoxClass>,
+    fields: HashMap<String, Value>,
+}
+
+impl LoxInstance {
+    pub fn new(class: Rc<LoxClass>) -> Self {
+        LoxInstance {
+            class,
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<Value> {
+        self.fields.get(name).cloned()
+    }
+
+    pub fn set(&mut self, name: String, value: Value) {
+        self.fields.insert(name, value);
+    }
+
+    pub fn class_name(&self) -> &str {
+        &self.class.name
     }
 }

@@ -1,5 +1,7 @@
 use crate::environment::Environment;
 use crate::expr::Expr;
+use crate::lox_callable::LoxCallable;
+use crate::lox_callable::LoxClass;
 use crate::lox_callable::NativeClock;
 use crate::stmt::Stmt;
 use crate::token::Literal;
@@ -17,6 +19,7 @@ pub enum RuntimeError {
     TypeMismatch(String),
     ZeroDivision,
     UndefinedVariable(String),
+    UndefinedProperty(String),
     ReturnValue(Value),
 }
 
@@ -101,6 +104,13 @@ impl Interpreter {
                 self.environment
                     .borrow_mut()
                     .define(name.lexeme.clone(), Value::Callable(Rc::new(function)));
+                Ok(())
+            }
+            Stmt::Class { name } => {
+                let class = LoxClass::new(name.lexeme.clone());
+                self.environment
+                    .borrow_mut()
+                    .define(name.lexeme.clone(), Value::Class(Rc::new(class)));
                 Ok(())
             }
             Stmt::Return { keyword: _, value } => {
@@ -250,6 +260,37 @@ impl Interpreter {
                     Err(RuntimeError::UndefinedVariable(name.lexeme.clone()))
                 }
             }
+            Expr::Get { object, name } => {
+                let object_value = self.evaluate(object)?;
+                match object_value {
+                    Value::Instance(instance) => instance
+                        .borrow()
+                        .get(&name.lexeme)
+                        .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone())),
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Only instances have properties.".into(),
+                    )),
+                }
+            }
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
+                let object_value = self.evaluate(object)?;
+                match object_value {
+                    Value::Instance(instance) => {
+                        let evaluated = self.evaluate(value)?;
+                        instance
+                            .borrow_mut()
+                            .set(name.lexeme.clone(), evaluated.clone());
+                        Ok(evaluated)
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Only instances have fields.".into(),
+                    )),
+                }
+            }
             Expr::Unary { operator, right } => {
                 let right_value = self.evaluate(right)?;
                 match operator.token_type {
@@ -286,6 +327,17 @@ impl Interpreter {
                             )));
                         }
                         callable.call(self, evaluated_args)
+                    }
+                    Value::Class(class) => {
+                        let expected = class.arity();
+                        let got = evaluated_args.len();
+                        if expected != got {
+                            return Err(RuntimeError::TypeMismatch(format!(
+                                "Expected {} arguments but got {}.",
+                                expected, got
+                            )));
+                        }
+                        class.call(self, evaluated_args)
                     }
                     _ => Err(RuntimeError::TypeMismatch(
                         "Can only call functions and classes.".into(),

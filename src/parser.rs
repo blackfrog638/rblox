@@ -34,6 +34,9 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt, ParseError> {
+        if self.match_token(&[TokenType::Class]) {
+            return self.class_declaration();
+        }
         if self.match_token(&[TokenType::Fun]) {
             return self.function("function");
         }
@@ -41,6 +44,13 @@ impl Parser {
             return self.var_declaration();
         }
         self.statement()
+    }
+
+    fn class_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.consume(TokenType::Identifier, "Expect class name.")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+        Ok(Stmt::Class { name })
     }
 
     fn function(&mut self, kind: &str) -> Result<Stmt, ParseError> {
@@ -249,11 +259,21 @@ impl Parser {
             let equals = self.previous().clone();
             let value = self.assignment()?;
 
-            if let Expr::Variable { name } = expr {
-                return Ok(Expr::Assign {
-                    name,
-                    value: Box::new(value),
-                });
+            match expr {
+                Expr::Variable { name } => {
+                    return Ok(Expr::Assign {
+                        name,
+                        value: Box::new(value),
+                    });
+                }
+                Expr::Get { object, name } => {
+                    return Ok(Expr::Set {
+                        object,
+                        name,
+                        value: Box::new(value),
+                    });
+                }
+                _ => {}
             }
 
             return Err(ParseError::Error(
@@ -378,6 +398,12 @@ impl Parser {
         loop {
             if self.match_token(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_token(&[TokenType::Dot]) {
+                let name = self.consume(TokenType::Identifier, "Expect property name after '.'.")?;
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                };
             } else {
                 break;
             }

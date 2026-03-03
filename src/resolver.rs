@@ -68,6 +68,10 @@ impl<'a> Resolver<'a> {
                 }
                 self.define(name);
             }
+            Stmt::Class { name } => {
+                self.declare(name)?;
+                self.define(name);
+            }
             Stmt::Function { name, params, body } => {
                 self.declare(name)?;
                 self.define(name);
@@ -125,6 +129,13 @@ impl<'a> Resolver<'a> {
             Expr::Assign { name, value } => {
                 self.resolve_expr(value)?;
                 self.resolve_local(expr, name);
+            }
+            Expr::Get { object, .. } => {
+                self.resolve_expr(object)?;
+            }
+            Expr::Set { object, value, .. } => {
+                self.resolve_expr(value)?;
+                self.resolve_expr(object)?;
             }
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr(left)?;

@@ -1,4 +1,5 @@
-use crate::lox_callable::LoxCallable;
+use crate::lox_callable::{LoxCallable, LoxClass, LoxInstance};
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,6 +10,8 @@ pub enum Value {
     Boolean(bool),
     Nil,
     Callable(Rc<dyn LoxCallable>),
+    Class(Rc<LoxClass>),
+    Instance(Rc<RefCell<LoxInstance>>),
 }
 
 impl fmt::Debug for Value {
@@ -19,6 +22,8 @@ impl fmt::Debug for Value {
             Value::Boolean(value) => write!(f, "Boolean({})", value),
             Value::Nil => write!(f, "Nil"),
             Value::Callable(c) => write!(f, "Callable(<fn {}>)", c.name()),
+            Value::Class(class) => write!(f, "Class({})", class.name),
+            Value::Instance(instance) => write!(f, "Instance({})", instance.borrow().class_name()),
         }
     }
 }
@@ -31,6 +36,8 @@ impl PartialEq for Value {
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
             (Value::Callable(a), Value::Callable(b)) => Rc::ptr_eq(a, b),
+            (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
+            (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -54,6 +61,10 @@ impl fmt::Display for Value {
             Value::Boolean(value) => write!(f, "{}", value),
             Value::Nil => write!(f, "nil"),
             Value::Callable(c) => write!(f, "<fn {}>", c.name()),
+            Value::Class(class) => write!(f, "<class {}>", class.name),
+            Value::Instance(instance) => {
+                write!(f, "<{} instance>", instance.borrow().class_name())
+            }
         }
     }
 }
