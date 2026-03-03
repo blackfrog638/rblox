@@ -51,6 +51,7 @@ pub struct LoxFunction {
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
     pub closure: Rc<RefCell<Environment>>,
+    pub is_initializer: bool,
 }
 
 impl LoxFunction {
@@ -59,12 +60,26 @@ impl LoxFunction {
         params: Vec<Token>,
         body: Vec<Stmt>,
         closure: Rc<RefCell<Environment>>,
+        is_initializer: bool,
     ) -> Self {
         LoxFunction {
             declaration_name,
             params,
             body,
             closure,
+            is_initializer,
+        }
+    }
+
+    pub fn bind(&self, instance: Rc<RefCell<LoxInstance>>) -> LoxFunction {
+        let env = Rc::new(RefCell::new(Environment::new_enclosed(self.closure.clone())));
+        env.borrow_mut().define("this".to_string(), Value::Instance(instance));
+        LoxFunction {
+            declaration_name: self.declaration_name.clone(),
+            params: self.params.clone(),
+            body: self.body.clone(),
+            closure: env,
+            is_initializer: self.is_initializer,
         }
     }
 }
@@ -85,8 +100,26 @@ impl LoxCallable for LoxFunction {
         }
 
         match interpreter.execute_block(&self.body, env) {
-            Ok(()) => Ok(Value::Nil),
-            Err(RuntimeError::ReturnValue(value)) => Ok(value),
+            Ok(()) => {
+                if self.is_initializer {
+                    self.closure
+                        .borrow()
+                        .get_at(0, "this")
+                        .ok_or_else(|| RuntimeError::UndefinedVariable("this".into()))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
+            Err(RuntimeError::ReturnValue(value)) => {
+                if self.is_initializer {
+                    self.closure
+                        .borrow()
+                        .get_at(0, "this")
+                        .ok_or_else(|| RuntimeError::UndefinedVariable("this".into()))
+                } else {
+                    Ok(value)
+                }
+            }
             Err(err) => Err(err),
         }
     }
@@ -107,17 +140,24 @@ impl fmt::Display for LoxFunction {
 #[derive(Clone)]
 pub struct LoxClass {
     pub name: String,
+    methods: HashMap<String, Rc<LoxFunction>>,
 }
 
 impl LoxClass {
-    pub fn new(name: String) -> Self {
-        LoxClass { name }
+    pub fn new(name: String, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
+        LoxClass { name, methods }
+    }
+
+    pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
+        self.methods.get(name).cloned()
     }
 }
 
 impl LoxCallable for LoxClass {
     fn arity(&self) -> usize {
-        0
+        self.find_method("init")
+            .map(|method| method.arity())
+            .unwrap_or(0)
     }
 
     fn call(
@@ -126,8 +166,12 @@ impl LoxCallable for LoxClass {
         _arguments: Vec<Value>,
     ) -> Result<Value, RuntimeError> {
         let class = Rc::new(self.clone());
-        let instance = LoxInstance::new(class);
-        Ok(Value::Instance(Rc::new(RefCell::new(instance))))
+        let instance = Rc::new(RefCell::new(LoxInstance::new(class.clone())));
+        if let Some(initializer) = class.find_method("init") {
+            let bound = initializer.bind(instance.clone());
+            bound.call(_interpreter, _arguments)?;
+        }
+        Ok(Value::Instance(instance))
     }
 
     fn name(&self) -> &str {
@@ -148,8 +192,16 @@ impl LoxInstance {
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<Value> {
-        self.fields.get(name).cloned()
+    pub fn get(instance: Rc<RefCell<LoxInstance>>, name: &str) -> Option<Value> {
+        if let Some(value) = instance.borrow().fields.get(name) {
+            return Some(value.clone());
+        }
+        let class = instance.borrow().class.clone();
+        if let Some(method) = class.find_method(name) {
+            let bound = method.bind(instance);
+            return Some(Value::Callable(Rc::new(bound)));
+        }
+        None
     }
 
     pub fn set(&mut self, name: String, value: Value) {

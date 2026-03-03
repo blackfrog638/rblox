@@ -30,12 +30,21 @@ impl fmt::Display for ResolveError {
 enum FunctionType {
     None,
     Function,
+    Initializer,
+    Method,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
     scopes: Vec<HashMap<String, bool>>,
     current_function: FunctionType,
+    current_class: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -44,6 +53,7 @@ impl<'a> Resolver<'a> {
             interpreter,
             scopes: Vec::new(),
             current_function: FunctionType::None,
+            current_class: ClassType::None,
         }
     }
 
@@ -68,14 +78,41 @@ impl<'a> Resolver<'a> {
                 }
                 self.define(name);
             }
-            Stmt::Class { name } => {
+            Stmt::Class { name, methods } => {
+                let enclosing_class = self.current_class;
+                self.current_class = ClassType::Class;
+
                 self.declare(name)?;
                 self.define(name);
+
+                self.begin_scope();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert("this".to_string(), true);
+                }
+
+                for method in methods {
+                    if let Stmt::Function {
+                        name: method_name,
+                        params,
+                        body,
+                    } = method
+                    {
+                        let function_type = if method_name.lexeme == "init" {
+                            FunctionType::Initializer
+                        } else {
+                            FunctionType::Method
+                        };
+                        self.resolve_function(params, body, function_type)?;
+                    }
+                }
+
+                self.end_scope();
+                self.current_class = enclosing_class;
             }
             Stmt::Function { name, params, body } => {
                 self.declare(name)?;
                 self.define(name);
-                self.resolve_function(params, body)?;
+                self.resolve_function(params, body, FunctionType::Function)?;
             }
             Stmt::Expression { expression } => {
                 self.resolve_expr(expression)?;
@@ -105,6 +142,12 @@ impl<'a> Resolver<'a> {
                         "Can't return from top-level code.",
                     ));
                 }
+                if self.current_function == FunctionType::Initializer && value.is_some() {
+                    return Err(ResolveError::new(
+                        keyword,
+                        "Can't return a value from an initializer.",
+                    ));
+                }
                 if let Some(expr) = value {
                     self.resolve_expr(expr)?;
                 }
@@ -125,6 +168,15 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 self.resolve_local(expr, name);
+            }
+            Expr::This { keyword } => {
+                if self.current_class == ClassType::None {
+                    return Err(ResolveError::new(
+                        keyword,
+                        "Can't use 'this' outside of a class.",
+                    ));
+                }
+                self.resolve_local(expr, keyword);
             }
             Expr::Assign { name, value } => {
                 self.resolve_expr(value)?;
@@ -164,9 +216,14 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    fn resolve_function(&mut self, params: &[Token], body: &[Stmt]) -> Result<(), ResolveError> {
+    fn resolve_function(
+        &mut self,
+        params: &[Token],
+        body: &[Stmt],
+        function_type: FunctionType,
+    ) -> Result<(), ResolveError> {
         let enclosing = self.current_function;
-        self.current_function = FunctionType::Function;
+        self.current_function = function_type;
         self.begin_scope();
         for param in params {
             self.declare(param)?;

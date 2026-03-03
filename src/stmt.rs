@@ -19,6 +19,7 @@ pub enum Stmt {
     },
     Class {
         name: Token,
+        methods: Vec<Stmt>,
     },
     If {
         condition: Expr,

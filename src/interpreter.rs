@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::lox_callable::LoxFunction;
+use std::collections::HashMap as StdHashMap;
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -100,17 +101,40 @@ impl Interpreter {
                     params.clone(),
                     body.clone(),
                     self.environment.clone(),
+                    false,
                 );
                 self.environment
                     .borrow_mut()
                     .define(name.lexeme.clone(), Value::Callable(Rc::new(function)));
                 Ok(())
             }
-            Stmt::Class { name } => {
-                let class = LoxClass::new(name.lexeme.clone());
+            Stmt::Class { name, methods } => {
                 self.environment
                     .borrow_mut()
-                    .define(name.lexeme.clone(), Value::Class(Rc::new(class)));
+                    .define(name.lexeme.clone(), Value::Nil);
+                let mut method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
+                for method in methods {
+                    if let Stmt::Function {
+                        name: method_name,
+                        params,
+                        body,
+                    } = method
+                    {
+                        let is_initializer = method_name.lexeme == "init";
+                        let function = LoxFunction::new(
+                            method_name.lexeme.clone(),
+                            params.clone(),
+                            body.clone(),
+                            self.environment.clone(),
+                            is_initializer,
+                        );
+                        method_map.insert(method_name.lexeme.clone(), Rc::new(function));
+                    }
+                }
+                let class = LoxClass::new(name.lexeme.clone(), method_map);
+                self.environment
+                    .borrow_mut()
+                    .assign(&name.lexeme, Value::Class(Rc::new(class)));
                 Ok(())
             }
             Stmt::Return { keyword: _, value } => {
@@ -263,10 +287,11 @@ impl Interpreter {
             Expr::Get { object, name } => {
                 let object_value = self.evaluate(object)?;
                 match object_value {
-                    Value::Instance(instance) => instance
-                        .borrow()
-                        .get(&name.lexeme)
-                        .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone())),
+                    Value::Instance(instance) => crate::lox_callable::LoxInstance::get(
+                        instance,
+                        &name.lexeme,
+                    )
+                    .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone())),
                     _ => Err(RuntimeError::TypeMismatch(
                         "Only instances have properties.".into(),
                     )),
@@ -291,6 +316,7 @@ impl Interpreter {
                     )),
                 }
             }
+            Expr::This { keyword } => self.lookup_variable(keyword, expr_ptr),
             Expr::Unary { operator, right } => {
                 let right_value = self.evaluate(right)?;
                 match operator.token_type {

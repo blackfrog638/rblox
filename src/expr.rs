@@ -29,6 +29,9 @@ pub enum Expr {
     Variable {
         name: Token,
     },
+    This {
+        keyword: Token,
+    },
     Get {
         object: Box<Expr>,
         name: Token,
@@ -83,6 +86,7 @@ impl Expr {
                 format!("({} {})", operator.lexeme, right.to_string())
             }
             Expr::Variable { name } => name.lexeme.clone(),
+            Expr::This { keyword } => keyword.lexeme.clone(),
             Expr::Get { object, name } => {
                 format!("(get {} {})", object.to_string(), name.lexeme)
             }
