@@ -78,7 +78,11 @@ impl<'a> Resolver<'a> {
                 }
                 self.define(name);
             }
-            Stmt::Class { name, methods } => {
+            Stmt::Class {
+                name,
+                methods,
+                static_methods,
+            } => {
                 let enclosing_class = self.current_class;
                 self.current_class = ClassType::Class;
 
@@ -103,6 +107,15 @@ impl<'a> Resolver<'a> {
                             FunctionType::Method
                         };
                         self.resolve_function(params, body, function_type)?;
+                    }
+                }
+
+                self.end_scope();
+
+                self.begin_scope();
+                for method in static_methods {
+                    if let Stmt::Function { params, body, .. } = method {
+                        self.resolve_function(params, body, FunctionType::Function)?;
                     }
                 }
 

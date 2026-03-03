@@ -141,15 +141,28 @@ impl fmt::Display for LoxFunction {
 pub struct LoxClass {
     pub name: String,
     methods: HashMap<String, Rc<LoxFunction>>,
+    static_methods: HashMap<String, Rc<LoxFunction>>,
 }
 
 impl LoxClass {
-    pub fn new(name: String, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
-        LoxClass { name, methods }
+    pub fn new(
+        name: String,
+        methods: HashMap<String, Rc<LoxFunction>>,
+        static_methods: HashMap<String, Rc<LoxFunction>>,
+    ) -> Self {
+        LoxClass {
+            name,
+            methods,
+            static_methods,
+        }
     }
 
     pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
         self.methods.get(name).cloned()
+    }
+
+    pub fn find_static_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
+        self.static_methods.get(name).cloned()
     }
 }
 

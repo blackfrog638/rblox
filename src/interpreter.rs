@@ -108,11 +108,16 @@ impl Interpreter {
                     .define(name.lexeme.clone(), Value::Callable(Rc::new(function)));
                 Ok(())
             }
-            Stmt::Class { name, methods } => {
+            Stmt::Class {
+                name,
+                methods,
+                static_methods,
+            } => {
                 self.environment
                     .borrow_mut()
                     .define(name.lexeme.clone(), Value::Nil);
                 let mut method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
+                let mut static_method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
                 for method in methods {
                     if let Stmt::Function {
                         name: method_name,
@@ -131,7 +136,24 @@ impl Interpreter {
                         method_map.insert(method_name.lexeme.clone(), Rc::new(function));
                     }
                 }
-                let class = LoxClass::new(name.lexeme.clone(), method_map);
+                for method in static_methods {
+                    if let Stmt::Function {
+                        name: method_name,
+                        params,
+                        body,
+                    } = method
+                    {
+                        let function = LoxFunction::new(
+                            method_name.lexeme.clone(),
+                            params.clone(),
+                            body.clone(),
+                            self.environment.clone(),
+                            false,
+                        );
+                        static_method_map.insert(method_name.lexeme.clone(), Rc::new(function));
+                    }
+                }
+                let class = LoxClass::new(name.lexeme.clone(), method_map, static_method_map);
                 self.environment
                     .borrow_mut()
                     .assign(&name.lexeme, Value::Class(Rc::new(class)));
@@ -287,13 +309,16 @@ impl Interpreter {
             Expr::Get { object, name } => {
                 let object_value = self.evaluate(object)?;
                 match object_value {
-                    Value::Instance(instance) => crate::lox_callable::LoxInstance::get(
-                        instance,
-                        &name.lexeme,
-                    )
-                    .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone())),
+                    Value::Instance(instance) => {
+                        crate::lox_callable::LoxInstance::get(instance, &name.lexeme)
+                            .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone()))
+                    }
+                    Value::Class(class) => class
+                        .find_static_method(&name.lexeme)
+                        .map(|method| Value::Callable(method))
+                        .ok_or_else(|| RuntimeError::UndefinedProperty(name.lexeme.clone())),
                     _ => Err(RuntimeError::TypeMismatch(
-                        "Only instances have properties.".into(),
+                        "Only instances and classes have properties.".into(),
                     )),
                 }
             }
