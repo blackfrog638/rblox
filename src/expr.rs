@@ -102,7 +102,7 @@ impl Expr {
             ),
             Expr::Call {
                 callee,
-                paren,
+                paren: _,
                 arguments,
             } => {
                 let args = arguments

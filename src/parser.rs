@@ -26,7 +26,6 @@ impl Parser {
                 Ok(stmt) => statements.push(stmt),
                 Err(err) => {
                     return Err(err);
-                    self.synchronize();
                 }
             }
         }
@@ -412,7 +411,8 @@ impl Parser {
             if self.match_token(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
             } else if self.match_token(&[TokenType::Dot]) {
-                let name = self.consume(TokenType::Identifier, "Expect property name after '.'.")?;
+                let name =
+                    self.consume(TokenType::Identifier, "Expect property name after '.'.")?;
                 expr = Expr::Get {
                     object: Box::new(expr),
                     name,
@@ -512,28 +512,6 @@ impl Parser {
             return false;
         }
         &self.peek().token_type == token_type
-    }
-
-    fn synchronize(&mut self) {
-        self.advance();
-
-        while !self.is_at_end() {
-            if self.previous().token_type == TokenType::Semicolon {
-                return;
-            }
-            match self.peek().token_type {
-                TokenType::Class
-                | TokenType::Fun
-                | TokenType::Var
-                | TokenType::For
-                | TokenType::If
-                | TokenType::While
-                | TokenType::Print
-                | TokenType::Return => return,
-                _ => (),
-            }
-            self.advance();
-        }
     }
 }
 

@@ -357,7 +357,7 @@ impl Interpreter {
             }
             Expr::Call {
                 callee,
-                paren,
+                paren: _,
                 arguments,
             } => {
                 let callee_value = self.evaluate(callee)?;
