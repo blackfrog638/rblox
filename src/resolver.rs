@@ -80,6 +80,7 @@ impl<'a> Resolver<'a> {
             }
             Stmt::Class {
                 name,
+                superclass,
                 methods,
                 static_methods,
             } => {
@@ -88,6 +89,21 @@ impl<'a> Resolver<'a> {
 
                 self.declare(name)?;
                 self.define(name);
+
+                if let Some(superclass_expr) = superclass {
+                    if let Expr::Variable {
+                        name: superclass_name,
+                    } = superclass_expr
+                    {
+                        if name.lexeme == superclass_name.lexeme {
+                            return Err(ResolveError::new(
+                                superclass_name,
+                                "A class can't inherit from itself.",
+                            ));
+                        }
+                    }
+                    self.resolve_expr(superclass_expr)?;
+                }
 
                 self.begin_scope();
                 if let Some(scope) = self.scopes.last_mut() {

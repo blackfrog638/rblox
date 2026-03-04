@@ -19,6 +19,7 @@ pub enum Stmt {
     },
     Class {
         name: Token,
+        superclass: Option<Expr>,
         methods: Vec<Stmt>,
         static_methods: Vec<Stmt>,
     },

@@ -72,8 +72,11 @@ impl LoxFunction {
     }
 
     pub fn bind(&self, instance: Rc<RefCell<LoxInstance>>) -> LoxFunction {
-        let env = Rc::new(RefCell::new(Environment::new_enclosed(self.closure.clone())));
-        env.borrow_mut().define("this".to_string(), Value::Instance(instance));
+        let env = Rc::new(RefCell::new(Environment::new_enclosed(
+            self.closure.clone(),
+        )));
+        env.borrow_mut()
+            .define("this".to_string(), Value::Instance(instance));
         LoxFunction {
             declaration_name: self.declaration_name.clone(),
             params: self.params.clone(),
@@ -94,7 +97,9 @@ impl LoxCallable for LoxFunction {
         interpreter: &mut Interpreter,
         arguments: Vec<Value>,
     ) -> Result<Value, RuntimeError> {
-        let env = Rc::new(RefCell::new(Environment::new_enclosed(self.closure.clone())));
+        let env = Rc::new(RefCell::new(Environment::new_enclosed(
+            self.closure.clone(),
+        )));
         for (param, arg) in self.params.iter().zip(arguments) {
             env.borrow_mut().define(param.lexeme.clone(), arg);
         }
@@ -140,6 +145,7 @@ impl fmt::Display for LoxFunction {
 #[derive(Clone)]
 pub struct LoxClass {
     pub name: String,
+    superclass: Option<Rc<LoxClass>>,
     methods: HashMap<String, Rc<LoxFunction>>,
     static_methods: HashMap<String, Rc<LoxFunction>>,
 }
@@ -147,18 +153,26 @@ pub struct LoxClass {
 impl LoxClass {
     pub fn new(
         name: String,
+        superclass: Option<Rc<LoxClass>>,
         methods: HashMap<String, Rc<LoxFunction>>,
         static_methods: HashMap<String, Rc<LoxFunction>>,
     ) -> Self {
         LoxClass {
             name,
+            superclass,
             methods,
             static_methods,
         }
     }
 
     pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
-        self.methods.get(name).cloned()
+        if let Some(method) = self.methods.get(name) {
+            Some(method.clone())
+        } else if let Some(superclass) = &self.superclass {
+            superclass.find_method(name)
+        } else {
+            None
+        }
     }
 
     pub fn find_static_method(&self, name: &str) -> Option<Rc<LoxFunction>> {

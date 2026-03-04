@@ -239,3 +239,57 @@ inst.ping();
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn subclass_inherits_instance_methods() {
+    let source = r#"
+class Doughnut {
+    cook() {
+        return "Fry until golden brown.";
+    }
+}
+
+class BostonCream < Doughnut {}
+
+var cooked = BostonCream().cook();
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let cooked = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("cooked"),
+        })
+        .expect("cooked should exist");
+    assert_eq!(cooked, Value::Str("Fry until golden brown.".to_string()));
+}
+
+#[test]
+fn superclass_must_be_a_class() {
+    let source = r#"
+var NotClass = "I am not a class";
+class Sub < NotClass {}
+"#;
+
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    assert!(
+        err.contains("Superclass must be a class."),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn class_cannot_inherit_from_itself() {
+    let source = r#"
+class Oops < Oops {}
+"#;
+
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    assert!(
+        err.contains("A class can't inherit from itself."),
+        "unexpected error: {err}"
+    );
+}

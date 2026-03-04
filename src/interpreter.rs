@@ -110,9 +110,24 @@ impl Interpreter {
             }
             Stmt::Class {
                 name,
+                superclass,
                 methods,
                 static_methods,
             } => {
+                let superclass_class = if let Some(superclass_expr) = superclass {
+                    let value = self.evaluate(superclass_expr)?;
+                    match value {
+                        Value::Class(class) => Some(class),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch(
+                                "Superclass must be a class.".into(),
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 self.environment
                     .borrow_mut()
                     .define(name.lexeme.clone(), Value::Nil);
@@ -153,7 +168,12 @@ impl Interpreter {
                         static_method_map.insert(method_name.lexeme.clone(), Rc::new(function));
                     }
                 }
-                let class = LoxClass::new(name.lexeme.clone(), method_map, static_method_map);
+                let class = LoxClass::new(
+                    name.lexeme.clone(),
+                    superclass_class,
+                    method_map,
+                    static_method_map,
+                );
                 self.environment
                     .borrow_mut()
                     .assign(&name.lexeme, Value::Class(Rc::new(class)));
