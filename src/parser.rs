@@ -3,6 +3,7 @@ use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::token::Token;
 use crate::token_type::TokenType;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -71,8 +72,8 @@ impl Parser {
         Ok(Stmt::Class {
             name,
             superclass,
-            methods,
-            static_methods,
+            methods: Rc::new(methods),
+            static_methods: Rc::new(static_methods),
         })
     }
 
@@ -104,7 +105,11 @@ impl Parser {
             &format!("Expect '{{' before {} body.", kind),
         )?;
         let body = self.block()?;
-        Ok(Stmt::Function { name, params, body })
+        Ok(Stmt::Function {
+            name,
+            params,
+            body: Rc::new(body),
+        })
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
@@ -491,8 +496,7 @@ impl Parser {
         if self.match_token(&[TokenType::Super]) {
             let keyword = self.previous().clone();
             self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
-            let method =
-                self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+            let method = self.consume(TokenType::Identifier, "Expect superclass method name.")?;
             return Ok(Expr::Super { keyword, method });
         }
         if self.match_token(&[TokenType::LeftParen]) {

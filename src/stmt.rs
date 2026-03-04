@@ -1,6 +1,7 @@
 // src/stmt.rs
 use crate::expr::Expr;
 use crate::token::Token;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -20,8 +21,8 @@ pub enum Stmt {
     Class {
         name: Token,
         superclass: Option<Expr>,
-        methods: Vec<Stmt>,
-        static_methods: Vec<Stmt>,
+        methods: Rc<Vec<Stmt>>,
+        static_methods: Rc<Vec<Stmt>>,
     },
     If {
         condition: Expr,
@@ -35,7 +36,7 @@ pub enum Stmt {
     Function {
         name: Token,
         params: Vec<Token>,
-        body: Vec<Stmt>,
+        body: Rc<Vec<Stmt>>,
     },
     Return {
         keyword: Token,

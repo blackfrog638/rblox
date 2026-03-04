@@ -49,7 +49,7 @@ impl LoxCallable for NativeClock {
 pub struct LoxFunction {
     pub declaration_name: String,
     pub params: Vec<Token>,
-    pub body: Vec<Stmt>,
+    pub body: Rc<Vec<Stmt>>,
     pub closure: Rc<RefCell<Environment>>,
     pub is_initializer: bool,
 }
@@ -58,7 +58,7 @@ impl LoxFunction {
     pub fn new(
         declaration_name: String,
         params: Vec<Token>,
-        body: Vec<Stmt>,
+        body: Rc<Vec<Stmt>>,
         closure: Rc<RefCell<Environment>>,
         is_initializer: bool,
     ) -> Self {
@@ -104,7 +104,7 @@ impl LoxCallable for LoxFunction {
             env.borrow_mut().define(param.lexeme.clone(), arg);
         }
 
-        match interpreter.execute_block(&self.body, env) {
+        match interpreter.execute_block(self.body.as_slice(), env) {
             Ok(()) => {
                 if self.is_initializer {
                     self.closure
@@ -176,7 +176,13 @@ impl LoxClass {
     }
 
     pub fn find_static_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
-        self.static_methods.get(name).cloned()
+        if let Some(method) = self.static_methods.get(name) {
+            Some(method.clone())
+        } else if let Some(superclass) = &self.superclass {
+            superclass.find_static_method(name)
+        } else {
+            None
+        }
     }
 }
 

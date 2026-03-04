@@ -116,7 +116,7 @@ impl<'a> Resolver<'a> {
                     scope.insert("this".to_string(), true);
                 }
 
-                for method in methods {
+                for method in methods.as_slice() {
                     if let Stmt::Function {
                         name: method_name,
                         params,
@@ -128,16 +128,16 @@ impl<'a> Resolver<'a> {
                         } else {
                             FunctionType::Method
                         };
-                        self.resolve_function(params, body, function_type)?;
+                        self.resolve_function(params, body.as_slice(), function_type)?;
                     }
                 }
 
                 self.end_scope();
 
                 self.begin_scope();
-                for method in static_methods {
+                for method in static_methods.as_slice() {
                     if let Stmt::Function { params, body, .. } = method {
-                        self.resolve_function(params, body, FunctionType::Function)?;
+                        self.resolve_function(params, body.as_slice(), FunctionType::Function)?;
                     }
                 }
 
@@ -152,7 +152,7 @@ impl<'a> Resolver<'a> {
             Stmt::Function { name, params, body } => {
                 self.declare(name)?;
                 self.define(name);
-                self.resolve_function(params, body, FunctionType::Function)?;
+                self.resolve_function(params, body.as_slice(), FunctionType::Function)?;
             }
             Stmt::Expression { expression } => {
                 self.resolve_expr(expression)?;

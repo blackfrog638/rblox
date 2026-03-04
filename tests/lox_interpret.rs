@@ -358,3 +358,76 @@ class Solo {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn subclass_inherits_superclass_initializer() {
+    let source = r#"
+class A {
+    init(v) {
+        this.v = v;
+    }
+}
+
+class B < A {}
+
+var got = B(42).v;
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let got = interpreter
+        .evaluate(&Expr::Variable { name: ident("got") })
+        .expect("got should exist");
+    assert_eq!(got, Value::Number(42.0));
+}
+
+#[test]
+fn subclass_initializer_can_delegate_to_super_init() {
+    let source = r#"
+class A {
+    init(v) {
+        this.v = v;
+    }
+}
+
+class B < A {
+    init(v) {
+        super.init(v + 1);
+    }
+}
+
+var got = B(41).v;
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let got = interpreter
+        .evaluate(&Expr::Variable { name: ident("got") })
+        .expect("got should exist");
+    assert_eq!(got, Value::Number(42.0));
+}
+
+#[test]
+fn subclass_inherits_static_methods() {
+    let source = r#"
+class A {
+    class ping() {
+        return "pong";
+    }
+}
+
+class B < A {}
+
+var got = B.ping();
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let got = interpreter
+        .evaluate(&Expr::Variable { name: ident("got") })
+        .expect("got should exist");
+    assert_eq!(got, Value::Str("pong".to_string()));
+}

@@ -147,7 +147,7 @@ impl Interpreter {
 
                 let mut method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
                 let mut static_method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
-                for method in methods {
+                for method in methods.as_slice() {
                     if let Stmt::Function {
                         name: method_name,
                         params,
@@ -165,7 +165,7 @@ impl Interpreter {
                         method_map.insert(method_name.lexeme.clone(), Rc::new(function));
                     }
                 }
-                for method in static_methods {
+                for method in static_methods.as_slice() {
                     if let Stmt::Function {
                         name: method_name,
                         params,
@@ -382,22 +382,17 @@ impl Interpreter {
             }
             Expr::This { keyword } => self.lookup_variable(keyword, expr_ptr),
             Expr::Super { keyword, method } => {
-                let resolved_distance = self.locals.get(&expr_ptr).copied();
+                let distance = self
+                    .locals
+                    .get(&expr_ptr)
+                    .copied()
+                    .ok_or_else(|| RuntimeError::UndefinedVariable(keyword.lexeme.clone()))?;
 
-                let superclass = if let Some(distance) = resolved_distance {
-                    self.environment.borrow().get_at(distance, "super")
+                let superclass = self.environment.borrow().get_at(distance, "super");
+                let object = if distance == 0 {
+                    None
                 } else {
-                    self.environment.borrow().get("super")
-                };
-
-                let object = if let Some(distance) = resolved_distance {
-                    if distance == 0 {
-                        None
-                    } else {
-                        self.environment.borrow().get_at(distance - 1, "this")
-                    }
-                } else {
-                    self.environment.borrow().get("this")
+                    self.environment.borrow().get_at(distance - 1, "this")
                 };
 
                 match (superclass, object) {
