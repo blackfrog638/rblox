@@ -488,6 +488,13 @@ impl Parser {
                 keyword: self.previous().clone(),
             });
         }
+        if self.match_token(&[TokenType::Super]) {
+            let keyword = self.previous().clone();
+            self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+            let method =
+                self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+            return Ok(Expr::Super { keyword, method });
+        }
         if self.match_token(&[TokenType::LeftParen]) {
             let expr = self.expression()?;
             self.consume(TokenType::RightParen, "Expect ')' after expression.")?;

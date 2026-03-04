@@ -38,6 +38,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 pub struct Resolver<'a> {
@@ -102,7 +103,12 @@ impl<'a> Resolver<'a> {
                             ));
                         }
                     }
+                    self.current_class = ClassType::Subclass;
                     self.resolve_expr(superclass_expr)?;
+                    self.begin_scope();
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert("super".to_string(), true);
+                    }
                 }
 
                 self.begin_scope();
@@ -136,6 +142,11 @@ impl<'a> Resolver<'a> {
                 }
 
                 self.end_scope();
+
+                if superclass.is_some() {
+                    self.end_scope();
+                }
+
                 self.current_class = enclosing_class;
             }
             Stmt::Function { name, params, body } => {
@@ -203,6 +214,21 @@ impl<'a> Resolver<'a> {
                     return Err(ResolveError::new(
                         keyword,
                         "Can't use 'this' outside of a class.",
+                    ));
+                }
+                self.resolve_local(expr, keyword);
+            }
+            Expr::Super { keyword, .. } => {
+                if self.current_class == ClassType::None {
+                    return Err(ResolveError::new(
+                        keyword,
+                        "Can't use 'super' outside of a class.",
+                    ));
+                }
+                if self.current_class != ClassType::Subclass {
+                    return Err(ResolveError::new(
+                        keyword,
+                        "Can't use 'super' in a class with no superclass.",
                     ));
                 }
                 self.resolve_local(expr, keyword);

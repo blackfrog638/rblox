@@ -128,9 +128,23 @@ impl Interpreter {
                     None
                 };
 
+                let has_superclass = superclass_class.is_some();
+
                 self.environment
                     .borrow_mut()
                     .define(name.lexeme.clone(), Value::Nil);
+
+                let enclosing_environment = self.environment.clone();
+                if let Some(superclass_class) = &superclass_class {
+                    let super_environment = Rc::new(RefCell::new(Environment::new_enclosed(
+                        self.environment.clone(),
+                    )));
+                    super_environment
+                        .borrow_mut()
+                        .define("super".to_string(), Value::Class(superclass_class.clone()));
+                    self.environment = super_environment;
+                }
+
                 let mut method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
                 let mut static_method_map: StdHashMap<String, Rc<LoxFunction>> = StdHashMap::new();
                 for method in methods {
@@ -168,6 +182,11 @@ impl Interpreter {
                         static_method_map.insert(method_name.lexeme.clone(), Rc::new(function));
                     }
                 }
+
+                if has_superclass {
+                    self.environment = enclosing_environment;
+                }
+
                 let class = LoxClass::new(
                     name.lexeme.clone(),
                     superclass_class,
@@ -362,6 +381,40 @@ impl Interpreter {
                 }
             }
             Expr::This { keyword } => self.lookup_variable(keyword, expr_ptr),
+            Expr::Super { keyword, method } => {
+                let resolved_distance = self.locals.get(&expr_ptr).copied();
+
+                let superclass = if let Some(distance) = resolved_distance {
+                    self.environment.borrow().get_at(distance, "super")
+                } else {
+                    self.environment.borrow().get("super")
+                };
+
+                let object = if let Some(distance) = resolved_distance {
+                    if distance == 0 {
+                        None
+                    } else {
+                        self.environment.borrow().get_at(distance - 1, "this")
+                    }
+                } else {
+                    self.environment.borrow().get("this")
+                };
+
+                match (superclass, object) {
+                    (Some(Value::Class(superclass)), Some(Value::Instance(instance))) => {
+                        if let Some(method_fn) = superclass.find_method(&method.lexeme) {
+                            let bound = method_fn.bind(instance);
+                            Ok(Value::Callable(Rc::new(bound)))
+                        } else {
+                            Err(RuntimeError::UndefinedProperty(method.lexeme.clone()))
+                        }
+                    }
+                    (None, _) => Err(RuntimeError::UndefinedVariable(keyword.lexeme.clone())),
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Invalid 'super' method lookup context.".into(),
+                    )),
+                }
+            }
             Expr::Unary { operator, right } => {
                 let right_value = self.evaluate(right)?;
                 match operator.token_type {

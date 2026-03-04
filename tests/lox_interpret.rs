@@ -293,3 +293,68 @@ class Oops < Oops {}
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn subclass_can_call_super_method() {
+    let source = r#"
+class A {
+    cook() {
+        return "A";
+    }
+}
+
+class B < A {
+    cook() {
+        return "B";
+    }
+
+    test() {
+        return super.cook();
+    }
+}
+
+var result = B().test();
+"#;
+
+    let mut app = run_source(source);
+    let interpreter = app.interpreter_mut();
+
+    let result = interpreter
+        .evaluate(&Expr::Variable {
+            name: ident("result"),
+        })
+        .expect("result should exist");
+    assert_eq!(result, Value::Str("A".to_string()));
+}
+
+#[test]
+fn super_cannot_be_used_outside_class() {
+    let source = r#"
+super.nope();
+"#;
+
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    assert!(
+        err.contains("Can't use 'super' outside of a class."),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn super_cannot_be_used_without_superclass() {
+    let source = r#"
+class Solo {
+    test() {
+        return super.test();
+    }
+}
+"#;
+
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    assert!(
+        err.contains("Can't use 'super' in a class with no superclass."),
+        "unexpected error: {err}"
+    );
+}
