@@ -3,15 +3,42 @@ use rblox::expr::Expr;
 use rblox::token::Token;
 use rblox::token_type::TokenType;
 use rblox::value::Value;
+use std::panic::Location;
+use std::time::Instant;
+
+#[track_caller]
+fn print_timing(label: &str, start: Instant) {
+    let elapsed = start.elapsed();
+    let caller = Location::caller();
+    println!(
+        "[timing] {} at {}:{} took {:.3}ms",
+        label,
+        caller.file(),
+        caller.line(),
+        elapsed.as_secs_f64() * 1000.0
+    );
+}
 
 fn ident(name: &str) -> Token {
     Token::new(TokenType::Identifier, name.to_string(), None, 1)
 }
 
+#[track_caller]
 fn run_source(source: &str) -> App {
+    let start = Instant::now();
     let mut app = App::new();
     app.run_source(source).expect("run should succeed");
+    print_timing("run_source", start);
     app
+}
+
+#[track_caller]
+fn run_source_expect_err(source: &str) -> String {
+    let start = Instant::now();
+    let mut app = App::new();
+    let err = app.run_source(source).expect_err("run should fail");
+    print_timing("run_source_expect_err", start);
+    err
 }
 
 fn load_fixture(name: &str) -> String {
@@ -232,8 +259,7 @@ var inst = Tools();
 inst.ping();
 "#;
 
-    let mut app = App::new();
-    let err = app.run_source(source).expect_err("run should fail");
+    let err = run_source_expect_err(source);
     assert!(
         err.contains("UndefinedProperty(\"ping\")"),
         "unexpected error: {err}"
@@ -272,8 +298,7 @@ var NotClass = "I am not a class";
 class Sub < NotClass {}
 "#;
 
-    let mut app = App::new();
-    let err = app.run_source(source).expect_err("run should fail");
+    let err = run_source_expect_err(source);
     assert!(
         err.contains("Superclass must be a class."),
         "unexpected error: {err}"
@@ -286,8 +311,7 @@ fn class_cannot_inherit_from_itself() {
 class Oops < Oops {}
 "#;
 
-    let mut app = App::new();
-    let err = app.run_source(source).expect_err("run should fail");
+    let err = run_source_expect_err(source);
     assert!(
         err.contains("A class can't inherit from itself."),
         "unexpected error: {err}"
@@ -333,8 +357,7 @@ fn super_cannot_be_used_outside_class() {
 super.nope();
 "#;
 
-    let mut app = App::new();
-    let err = app.run_source(source).expect_err("run should fail");
+    let err = run_source_expect_err(source);
     assert!(
         err.contains("Can't use 'super' outside of a class."),
         "unexpected error: {err}"
@@ -351,12 +374,28 @@ class Solo {
 }
 "#;
 
-    let mut app = App::new();
-    let err = app.run_source(source).expect_err("run should fail");
+    let err = run_source_expect_err(source);
     assert!(
         err.contains("Can't use 'super' in a class with no superclass."),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn fib_clock_example_runs() {
+    let source = r#"
+fun fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+
+var before = clock();
+print fib(32);
+var after = clock();
+print after - before;
+"#;
+
+    let _ = run_source(source);
 }
 
 #[test]
