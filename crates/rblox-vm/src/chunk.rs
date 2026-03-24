@@ -130,7 +130,10 @@ fn simple_instruction(name: &str) -> String {
 
 fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str) -> (String, usize) {
     let Some(index) = chunk.code.get(offset + 1).copied() else {
-        return (format!("{}OP_CONSTANT <missing constant index>", prefix), offset + 1);
+        return (
+            format!("{}OP_CONSTANT <missing constant index>", prefix),
+            offset + 1,
+        );
     };
 
     let value_text = chunk

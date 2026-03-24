@@ -1,5 +1,5 @@
 pub mod chunk;
 
 pub use chunk::{
-	disassemble_chunk, disassemble_instruction, Chunk, LineRun, Value, OP_CONSTANT, OP_RETURN,
+    Chunk, LineRun, OP_CONSTANT, OP_RETURN, Value, disassemble_chunk, disassemble_instruction,
 };
