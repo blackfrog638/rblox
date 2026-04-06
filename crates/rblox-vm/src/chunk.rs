@@ -1,7 +1,12 @@
 use std::fmt;
 
 pub const OP_CONSTANT: u8 = 0;
-pub const OP_RETURN: u8 = 1;
+pub const OP_ADD: u8 = 1;
+pub const OP_SUBTRACT: u8 = 2;
+pub const OP_MULTIPLY: u8 = 3;
+pub const OP_DIVIDE: u8 = 4;
+pub const OP_NEGATE: u8 = 5;
+pub const OP_RETURN: u8 = 6;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -102,6 +107,26 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
     let instruction = chunk.code[offset];
 
     match instruction {
+        OP_ADD => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_ADD"));
+            (line, offset + 1)
+        }
+        OP_SUBTRACT => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_SUBTRACT"));
+            (line, offset + 1)
+        }
+        OP_MULTIPLY => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_MULTIPLY"));
+            (line, offset + 1)
+        }
+        OP_DIVIDE => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_DIVIDE"));
+            (line, offset + 1)
+        }
+        OP_NEGATE => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_NEGATE"));
+            (line, offset + 1)
+        }
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)
@@ -199,5 +224,24 @@ mod tests {
         assert!(output.contains("OP_CONSTANT"));
         assert!(output.contains("3.14"));
         assert!(output.contains("OP_RETURN"));
+    }
+
+    #[test]
+    fn disassemble_shows_arithmetic_opcodes() {
+        let mut chunk = Chunk::new();
+        chunk.write(OP_ADD, 1);
+        chunk.write(OP_SUBTRACT, 1);
+        chunk.write(OP_MULTIPLY, 1);
+        chunk.write(OP_DIVIDE, 1);
+        chunk.write(OP_NEGATE, 1);
+        chunk.write(OP_RETURN, 1);
+
+        let output = disassemble_chunk(&chunk, "arith");
+
+        assert!(output.contains("OP_ADD"));
+        assert!(output.contains("OP_SUBTRACT"));
+        assert!(output.contains("OP_MULTIPLY"));
+        assert!(output.contains("OP_DIVIDE"));
+        assert!(output.contains("OP_NEGATE"));
     }
 }
