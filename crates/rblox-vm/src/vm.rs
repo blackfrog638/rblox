@@ -1,7 +1,8 @@
 use crate::chunk::{
-    disassemble_instruction, Chunk, OP_ADD, OP_CONSTANT, OP_DIVIDE, OP_MULTIPLY, OP_NEGATE,
-    OP_RETURN, OP_SUBTRACT, Value,
+    Chunk, OP_ADD, OP_CONSTANT, OP_DIVIDE, OP_MULTIPLY, OP_NEGATE, OP_RETURN, OP_SUBTRACT, Value,
+    disassemble_instruction,
 };
+use crate::compiler::compile;
 
 pub struct VM {
     chunk: Chunk,
@@ -24,7 +25,15 @@ impl VM {
         self.trace_execution = enabled;
     }
 
-    pub fn interpret(&mut self, chunk: Chunk) -> Result<(), String> {
+    pub fn interpret(&mut self, source: &str) -> Result<(), String> {
+        self.chunk = compile(source)?;
+        self.ip = 0;
+        self.reset_stack();
+
+        self.run()
+    }
+
+    pub fn interpret_chunk(&mut self, chunk: Chunk) -> Result<(), String> {
         self.chunk = chunk;
         self.ip = 0;
         self.reset_stack();
@@ -174,7 +183,7 @@ mod tests {
         chunk.write(OP_RETURN, 1);
 
         let mut vm = VM::new();
-        let result = vm.interpret(chunk);
+        let result = vm.interpret_chunk(chunk);
 
         assert!(result.is_ok());
         assert!(vm.stack.is_empty());
@@ -191,12 +200,14 @@ mod tests {
         chunk.write(OP_RETURN, 1);
 
         let mut vm = VM::new();
-        let result = vm.interpret(chunk);
+        let result = vm.interpret_chunk(chunk);
 
         assert!(result.is_err());
-        assert!(result
-            .expect_err("expected runtime error")
-            .contains("Operand must be a number."));
+        assert!(
+            result
+                .expect_err("expected runtime error")
+                .contains("Operand must be a number.")
+        );
     }
 
     #[test]
@@ -210,7 +221,7 @@ mod tests {
         let mut vm = VM::new();
         vm.set_trace_execution(true);
 
-        let result = vm.interpret(chunk);
+        let result = vm.interpret_chunk(chunk);
         assert!(result.is_ok());
     }
 }

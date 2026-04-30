@@ -71,48 +71,27 @@ fn run_source(vm: &mut rblox_vm::VM, source: &str) -> Result<(), u8> {
         return Ok(());
     }
 
-    // Chapter 16 wiring: source -> compile -> VM.
-    // Replace this stub with the real compiler as you continue chapters 17+.
-    let chunk = compile_source_stub(trimmed).map_err(|error| {
+    vm.interpret(trimmed).map_err(|error| {
         eprintln!("{}", error);
-        EX_DATAERR
-    })?;
-
-    vm.interpret(chunk).map_err(|error| {
-        eprintln!("{}", error);
-        EX_SOFTWARE
+        if error.starts_with("Compile error:") {
+            EX_DATAERR
+        } else {
+            EX_SOFTWARE
+        }
     })
-}
-
-fn compile_source_stub(source: &str) -> Result<rblox_vm::Chunk, String> {
-    let number = source.parse::<f64>().map_err(|_| {
-        format!(
-            "Compile error: only number literals are supported for now (got '{}').",
-            source
-        )
-    })?;
-
-    let mut chunk = rblox_vm::Chunk::new();
-    let index = chunk.add_constant(rblox_vm::Value::Number(number));
-    chunk.write(rblox_vm::OP_CONSTANT, 1);
-    chunk.write(index, 1);
-    chunk.write(rblox_vm::OP_RETURN, 1);
-    Ok(chunk)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn compile_source_stub_accepts_number_literal() {
-        let chunk = compile_source_stub("3.14").expect("number literal should compile");
+    fn compile_accepts_number_literal() {
+        let chunk = rblox_vm::compile("3.14").expect("number literal should compile");
         assert_eq!(chunk.code.len(), 3);
     }
 
     #[test]
-    fn compile_source_stub_rejects_non_number() {
-        let result = compile_source_stub("1 + 2");
+    fn compile_rejects_non_number() {
+        let result = rblox_vm::compile("1 + 2");
         assert!(result.is_err());
     }
 }
