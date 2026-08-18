@@ -74,7 +74,10 @@ impl<'a> Parser<'a> {
     fn parse_equality(&mut self) -> Result<(), String> {
         self.parse_comparison()?;
 
-        while matches!(self.peek().kind, TokenKind::BangEqual | TokenKind::EqualEqual) {
+        while matches!(
+            self.peek().kind,
+            TokenKind::BangEqual | TokenKind::EqualEqual
+        ) {
             let operator = self.advance().kind;
             self.parse_comparison()?;
             match operator {
