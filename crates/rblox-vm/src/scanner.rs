@@ -1,8 +1,61 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+#[derive(Clone, Default, Debug)]
+struct KeywordTrie {
+    children: HashMap<char, KeywordTrie>,
+    token_kind: Option<TokenKind>,
+}
+
+impl KeywordTrie {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn insert(&mut self, keyword: &str, token_kind: TokenKind) {
+        let mut node = self;
+        for ch in keyword.chars() {
+            node = node.children.entry(ch).or_default();
+        }
+        node.token_kind = Some(token_kind);
+    }
+
+    fn lookup(&self, word: &str) -> Option<TokenKind> {
+        let mut node = self;
+        for ch in word.chars() {
+            node = node.children.get(&ch)?;
+        }
+        node.token_kind
+    }
+}
+
+static KEYWORDS: LazyLock<KeywordTrie> = LazyLock::new(|| {
+    let mut trie = KeywordTrie::new();
+    trie.insert("and", TokenKind::And);
+    trie.insert("class", TokenKind::Class);
+    trie.insert("else", TokenKind::Else);
+    trie.insert("false", TokenKind::False);
+    trie.insert("for", TokenKind::For);
+    trie.insert("fun", TokenKind::Fun);
+    trie.insert("if", TokenKind::If);
+    trie.insert("nil", TokenKind::Nil);
+    trie.insert("or", TokenKind::Or);
+    trie.insert("print", TokenKind::Print);
+    trie.insert("return", TokenKind::Return);
+    trie.insert("super", TokenKind::Super);
+    trie.insert("this", TokenKind::This);
+    trie.insert("true", TokenKind::True);
+    trie.insert("var", TokenKind::Var);
+    trie.insert("while", TokenKind::While);
+    trie
+});
+
 pub struct Scanner<'a> {
     source: &'a str,
     start: usize,
     current: usize,
     line: usize,
+    keyword_trie: &'static KeywordTrie,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +120,7 @@ impl<'a> Scanner<'a> {
             start: 0,
             current: 0,
             line: 1,
+            keyword_trie: &KEYWORDS,
         }
     }
 
@@ -165,25 +219,9 @@ impl<'a> Scanner<'a> {
     }
 
     fn identifier_kind(&self) -> TokenKind {
-        match self.lexeme() {
-            "and" => TokenKind::And,
-            "class" => TokenKind::Class,
-            "else" => TokenKind::Else,
-            "false" => TokenKind::False,
-            "for" => TokenKind::For,
-            "fun" => TokenKind::Fun,
-            "if" => TokenKind::If,
-            "nil" => TokenKind::Nil,
-            "or" => TokenKind::Or,
-            "print" => TokenKind::Print,
-            "return" => TokenKind::Return,
-            "super" => TokenKind::Super,
-            "this" => TokenKind::This,
-            "true" => TokenKind::True,
-            "var" => TokenKind::Var,
-            "while" => TokenKind::While,
-            _ => TokenKind::Identifier,
-        }
+        self.keyword_trie
+            .lookup(self.lexeme())
+            .unwrap_or(TokenKind::Identifier)
     }
 
     fn number(&mut self) -> Token<'a> {
@@ -404,5 +442,14 @@ mod tests {
         assert_eq!(unexpected.lexeme, "Unexpected character.");
         assert_eq!(unterminated.kind, TokenKind::Error);
         assert_eq!(unterminated.lexeme, "Unterminated string.");
+    }
+
+    #[test]
+    fn trie_lookup_resolves_keywords() {
+        let trie = &KEYWORDS;
+
+        assert_eq!(trie.lookup("if"), Some(TokenKind::If));
+        assert_eq!(trie.lookup("while"), Some(TokenKind::While));
+        assert_eq!(trie.lookup("identifier"), None);
     }
 }

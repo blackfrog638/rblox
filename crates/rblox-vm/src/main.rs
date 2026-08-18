@@ -90,8 +90,8 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_non_number() {
-        let result = rblox_vm::compile("1 + 2");
-        assert!(result.is_err());
+    fn compile_accepts_arithmetic_expression() {
+        let chunk = rblox_vm::compile("1 + 2").expect("arithmetic expression should compile");
+        assert_eq!(chunk.code.len(), 6);
     }
 }
