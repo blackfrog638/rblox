@@ -1,12 +1,22 @@
 use std::fmt;
 
 pub const OP_CONSTANT: u8 = 0;
-pub const OP_ADD: u8 = 1;
-pub const OP_SUBTRACT: u8 = 2;
-pub const OP_MULTIPLY: u8 = 3;
-pub const OP_DIVIDE: u8 = 4;
-pub const OP_NEGATE: u8 = 5;
-pub const OP_RETURN: u8 = 6;
+pub const OP_NIL: u8 = 1;
+pub const OP_TRUE: u8 = 2;
+pub const OP_FALSE: u8 = 3;
+pub const OP_EQUAL: u8 = 4;
+pub const OP_GREATER: u8 = 5;
+pub const OP_LESS: u8 = 6;
+pub const OP_AND: u8 = 7;
+pub const OP_OR: u8 = 8;
+pub const OP_ADD: u8 = 9;
+pub const OP_SUBTRACT: u8 = 10;
+pub const OP_MULTIPLY: u8 = 11;
+pub const OP_DIVIDE: u8 = 12;
+pub const OP_NOT: u8 = 13;
+pub const OP_NEGATE: u8 = 14;
+pub const OP_PRINT: u8 = 15;
+pub const OP_RETURN: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -107,6 +117,39 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
     let instruction = chunk.code[offset];
 
     match instruction {
+        OP_CONSTANT => constant_instruction(chunk, offset, &prefix),
+        OP_NIL => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
+            (line, offset + 1)
+        }
+        OP_TRUE => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_TRUE"));
+            (line, offset + 1)
+        }
+        OP_FALSE => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_FALSE"));
+            (line, offset + 1)
+        }
+        OP_EQUAL => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_EQUAL"));
+            (line, offset + 1)
+        }
+        OP_GREATER => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_GREATER"));
+            (line, offset + 1)
+        }
+        OP_LESS => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_LESS"));
+            (line, offset + 1)
+        }
+        OP_AND => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_AND"));
+            (line, offset + 1)
+        }
+        OP_OR => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_OR"));
+            (line, offset + 1)
+        }
         OP_ADD => {
             let line = format!("{}{}", prefix, simple_instruction("OP_ADD"));
             (line, offset + 1)
@@ -123,15 +166,22 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             let line = format!("{}{}", prefix, simple_instruction("OP_DIVIDE"));
             (line, offset + 1)
         }
+        OP_NOT => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_NOT"));
+            (line, offset + 1)
+        }
         OP_NEGATE => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NEGATE"));
+            (line, offset + 1)
+        }
+        OP_PRINT => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_PRINT"));
             (line, offset + 1)
         }
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)
         }
-        OP_CONSTANT => constant_instruction(chunk, offset, &prefix),
         _ => {
             let line = format!("{}Unknown opcode {}", prefix, instruction);
             (line, offset + 1)

@@ -1,5 +1,6 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CONSTANT, OP_DIVIDE, OP_MULTIPLY, OP_NEGATE, OP_RETURN, OP_SUBTRACT, Value,
+    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_RETURN, OP_SUBTRACT, OP_TRUE, Value,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -43,7 +44,77 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Result<(), String> {
-        self.parse_additive()
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<(), String> {
+        self.parse_and()?;
+
+        while matches!(self.peek().kind, TokenKind::Or) {
+            self.advance();
+            self.parse_and()?;
+            self.emit(OP_OR);
+        }
+
+        Ok(())
+    }
+
+    fn parse_and(&mut self) -> Result<(), String> {
+        self.parse_equality()?;
+
+        while matches!(self.peek().kind, TokenKind::And) {
+            self.advance();
+            self.parse_equality()?;
+            self.emit(OP_AND);
+        }
+
+        Ok(())
+    }
+
+    fn parse_equality(&mut self) -> Result<(), String> {
+        self.parse_comparison()?;
+
+        while matches!(self.peek().kind, TokenKind::BangEqual | TokenKind::EqualEqual) {
+            let operator = self.advance().kind;
+            self.parse_comparison()?;
+            match operator {
+                TokenKind::BangEqual => {
+                    self.emit(OP_EQUAL);
+                    self.emit(OP_NOT);
+                }
+                TokenKind::EqualEqual => self.emit(OP_EQUAL),
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_comparison(&mut self) -> Result<(), String> {
+        self.parse_additive()?;
+
+        while matches!(
+            self.peek().kind,
+            TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
+        ) {
+            let operator = self.advance().kind;
+            self.parse_additive()?;
+            match operator {
+                TokenKind::Greater => self.emit(OP_GREATER),
+                TokenKind::Less => self.emit(OP_LESS),
+                TokenKind::GreaterEqual => {
+                    self.emit(OP_LESS);
+                    self.emit(OP_NOT);
+                }
+                TokenKind::LessEqual => {
+                    self.emit(OP_GREATER);
+                    self.emit(OP_NOT);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_additive(&mut self) -> Result<(), String> {
@@ -81,10 +152,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary(&mut self) -> Result<(), String> {
-        if matches!(self.peek().kind, TokenKind::Minus) {
-            self.advance();
+        if matches!(self.peek().kind, TokenKind::Minus | TokenKind::Bang) {
+            let operator = self.advance().kind;
             self.parse_unary()?;
-            self.emit(OP_NEGATE);
+            match operator {
+                TokenKind::Minus => self.emit(OP_NEGATE),
+                TokenKind::Bang => self.emit(OP_NOT),
+                _ => unreachable!(),
+            }
             return Ok(());
         }
 
@@ -100,6 +175,21 @@ impl<'a> Parser<'a> {
                     .parse::<f64>()
                     .map_err(|_| format!("Compile error: invalid number '{}'.", number.lexeme))?;
                 self.emit_constant(Value::Number(value));
+                Ok(())
+            }
+            TokenKind::True => {
+                self.advance();
+                self.emit(OP_TRUE);
+                Ok(())
+            }
+            TokenKind::False => {
+                self.advance();
+                self.emit(OP_FALSE);
+                Ok(())
+            }
+            TokenKind::Nil => {
+                self.advance();
+                self.emit(OP_NIL);
                 Ok(())
             }
             TokenKind::LeftParen => {
@@ -166,12 +256,24 @@ mod tests {
     #[test]
     fn compile_handles_simple_binary_expression() {
         let chunk = compile("1 + 2").expect("simple expression should compile");
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 1, 6]);
+        assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 16]);
     }
 
     #[test]
     fn compile_respects_operator_precedence() {
         let chunk = compile("1 + 2 * 3").expect("precedence should compile");
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 3, 1, 6]);
+        assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 16]);
+    }
+
+    #[test]
+    fn compile_supports_boolean_and_nil_literals() {
+        let chunk = compile("true and false or nil").expect("boolean and nil should compile");
+        assert_eq!(chunk.code.len(), 6);
+    }
+
+    #[test]
+    fn compile_supports_equality_and_comparison() {
+        let chunk = compile("1 < 2 == true").expect("comparison should compile");
+        assert_eq!(chunk.code.len(), 8);
     }
 }

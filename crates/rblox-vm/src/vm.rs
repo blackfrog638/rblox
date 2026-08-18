@@ -1,6 +1,7 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CONSTANT, OP_DIVIDE, OP_MULTIPLY, OP_NEGATE, OP_RETURN, OP_SUBTRACT, Value,
-    disassemble_instruction,
+    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN, OP_SUBTRACT, OP_TRUE,
+    Value, disassemble_instruction,
 };
 use crate::compiler::compile;
 
@@ -53,6 +54,34 @@ impl VM {
                     let constant = self.read_constant()?;
                     self.push(constant);
                 }
+                OP_NIL => self.push(Value::Nil),
+                OP_TRUE => self.push(Value::Bool(true)),
+                OP_FALSE => self.push(Value::Bool(false)),
+                OP_EQUAL => {
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+                    self.push(Value::Bool(left == right));
+                }
+                OP_GREATER => {
+                    self.binary_number_op("Operands must be numbers.", |a, b| {
+                        if a > b { 1.0 } else { 0.0 }
+                    })?;
+                }
+                OP_LESS => {
+                    self.binary_number_op("Operands must be numbers.", |a, b| {
+                        if a < b { 1.0 } else { 0.0 }
+                    })?;
+                }
+                OP_AND => {
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+                    self.push(Value::Bool(self.is_truthy(left.clone()) && self.is_truthy(right.clone())));
+                }
+                OP_OR => {
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+                    self.push(Value::Bool(self.is_truthy(left.clone()) || self.is_truthy(right.clone())));
+                }
                 OP_ADD => {
                     self.binary_number_op("Operands must be numbers.", |a, b| a + b)?;
                 }
@@ -65,12 +94,20 @@ impl VM {
                 OP_DIVIDE => {
                     self.binary_number_op("Operands must be numbers.", |a, b| a / b)?;
                 }
+                OP_NOT => {
+                    let value = self.pop()?;
+                    self.push(Value::Bool(!self.is_truthy(value)));
+                }
                 OP_NEGATE => {
                     let value = self.pop()?;
                     match value {
                         Value::Number(number) => self.push(Value::Number(-number)),
                         _ => return Err(self.runtime_error("Operand must be a number.")),
                     }
+                }
+                OP_PRINT => {
+                    let value = self.pop()?;
+                    println!("{}", value);
                 }
                 OP_RETURN => {
                     let value = self.pop()?;
@@ -144,6 +181,14 @@ impl VM {
     fn runtime_error(&self, message: &str) -> String {
         let line = self.chunk.line_at(self.ip.saturating_sub(1)).unwrap_or(0);
         format!("{}\n[line {}] in script", message, line)
+    }
+
+    fn is_truthy(&self, value: Value) -> bool {
+        match value {
+            Value::Nil => false,
+            Value::Bool(value) => value,
+            _ => true,
+        }
     }
 
     fn trace_current_state(&self) {
