@@ -75,12 +75,16 @@ impl VM {
                 OP_AND => {
                     let right = self.pop()?;
                     let left = self.pop()?;
-                    self.push(Value::Bool(self.is_truthy(left.clone()) && self.is_truthy(right.clone())));
+                    self.push(Value::Bool(
+                        self.is_truthy(left.clone()) && self.is_truthy(right.clone()),
+                    ));
                 }
                 OP_OR => {
                     let right = self.pop()?;
                     let left = self.pop()?;
-                    self.push(Value::Bool(self.is_truthy(left.clone()) || self.is_truthy(right.clone())));
+                    self.push(Value::Bool(
+                        self.is_truthy(left.clone()) || self.is_truthy(right.clone()),
+                    ));
                 }
                 OP_ADD => {
                     self.binary_number_op("Operands must be numbers.", |a, b| a + b)?;
