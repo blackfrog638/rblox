@@ -28,6 +28,121 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
     Ok(parser.chunk)
 }
 
+struct ParseRule {
+    prefix: Option<PrefixRule>,
+    infix: Option<InfixRule>,
+    precedence: Precedence,
+}
+
+enum PrefixRule {
+    Grouping,
+    Unary,
+    Number,
+    Literal,
+}
+
+enum InfixRule {
+    Binary,
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+enum Precedence {
+    None,
+    Assignment,
+    Or,
+    And,
+    Equality,
+    Comparison,
+    Term,
+    Factor,
+    Unary,
+    Primary,
+}
+
+impl Precedence {
+    fn next(self) -> Self {
+        match self {
+            Self::None => Self::Assignment,
+            Self::Assignment => Self::Or,
+            Self::Or => Self::And,
+            Self::And => Self::Equality,
+            Self::Equality => Self::Comparison,
+            Self::Comparison => Self::Term,
+            Self::Term => Self::Factor,
+            Self::Factor => Self::Unary,
+            Self::Unary => Self::Primary,
+            Self::Primary => Self::Primary,
+        }
+    }
+}
+
+fn get_rule(kind: TokenKind) -> ParseRule {
+    match kind {
+        TokenKind::LeftParen => ParseRule {
+            prefix: Some(PrefixRule::Grouping),
+            infix: None,
+            precedence: Precedence::None,
+        },
+        TokenKind::Minus => ParseRule {
+            prefix: Some(PrefixRule::Unary),
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::Term,
+        },
+        TokenKind::Plus => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::Term,
+        },
+        TokenKind::Slash | TokenKind::Star => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::Factor,
+        },
+        TokenKind::Bang => ParseRule {
+            prefix: Some(PrefixRule::Unary),
+            infix: None,
+            precedence: Precedence::None,
+        },
+        TokenKind::BangEqual | TokenKind::EqualEqual => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::Equality,
+        },
+        TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual => {
+            ParseRule {
+                prefix: None,
+                infix: Some(InfixRule::Binary),
+                precedence: Precedence::Comparison,
+            }
+        }
+        TokenKind::And => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::And,
+        },
+        TokenKind::Or => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Binary),
+            precedence: Precedence::Or,
+        },
+        TokenKind::Number => ParseRule {
+            prefix: Some(PrefixRule::Number),
+            infix: None,
+            precedence: Precedence::None,
+        },
+        TokenKind::True | TokenKind::False | TokenKind::Nil => ParseRule {
+            prefix: Some(PrefixRule::Literal),
+            infix: None,
+            precedence: Precedence::None,
+        },
+        _ => ParseRule {
+            prefix: None,
+            infix: None,
+            precedence: Precedence::None,
+        },
+    }
+}
+
 struct Parser<'a> {
     tokens: &'a [Token<'a>],
     current: usize,
@@ -44,168 +159,101 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Result<(), String> {
-        self.parse_or()
+        self.parse_precedence(Precedence::Assignment)
     }
 
-    fn parse_or(&mut self) -> Result<(), String> {
-        self.parse_and()?;
-
-        while matches!(self.peek().kind, TokenKind::Or) {
-            self.advance();
-            self.parse_and()?;
-            self.emit(OP_OR);
+    fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), String> {
+        let token = self.advance();
+        let prefix = get_rule(token.kind).prefix.ok_or_else(|| {
+            format!(
+                "Compile error: expected expression, found '{}'.",
+                token.lexeme
+            )
+        })?;
+        match prefix {
+            PrefixRule::Grouping => self.parse_grouping()?,
+            PrefixRule::Unary => self.parse_unary()?,
+            PrefixRule::Number => self.parse_number()?,
+            PrefixRule::Literal => self.parse_literal()?,
         }
 
-        Ok(())
-    }
-
-    fn parse_and(&mut self) -> Result<(), String> {
-        self.parse_equality()?;
-
-        while matches!(self.peek().kind, TokenKind::And) {
-            self.advance();
-            self.parse_equality()?;
-            self.emit(OP_AND);
-        }
-
-        Ok(())
-    }
-
-    fn parse_equality(&mut self) -> Result<(), String> {
-        self.parse_comparison()?;
-
-        while matches!(
-            self.peek().kind,
-            TokenKind::BangEqual | TokenKind::EqualEqual
-        ) {
-            let operator = self.advance().kind;
-            self.parse_comparison()?;
-            match operator {
-                TokenKind::BangEqual => {
-                    self.emit(OP_EQUAL);
-                    self.emit(OP_NOT);
-                }
-                TokenKind::EqualEqual => self.emit(OP_EQUAL),
-                _ => unreachable!(),
+        while precedence <= get_rule(self.peek().kind).precedence {
+            let infix = self.advance();
+            let rule = get_rule(infix.kind);
+            match rule.infix.expect("infix rule must have a parser") {
+                InfixRule::Binary => self.parse_binary()?,
             }
         }
 
         Ok(())
     }
 
-    fn parse_comparison(&mut self) -> Result<(), String> {
-        self.parse_additive()?;
-
-        while matches!(
-            self.peek().kind,
-            TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
-        ) {
-            let operator = self.advance().kind;
-            self.parse_additive()?;
-            match operator {
-                TokenKind::Greater => self.emit(OP_GREATER),
-                TokenKind::Less => self.emit(OP_LESS),
-                TokenKind::GreaterEqual => {
-                    self.emit(OP_LESS);
-                    self.emit(OP_NOT);
-                }
-                TokenKind::LessEqual => {
-                    self.emit(OP_GREATER);
-                    self.emit(OP_NOT);
-                }
-                _ => unreachable!(),
-            }
-        }
-
+    fn parse_number(&mut self) -> Result<(), String> {
+        let number = self.previous();
+        let value = number
+            .lexeme
+            .parse::<f64>()
+            .map_err(|_| format!("Compile error: invalid number '{}'.", number.lexeme))?;
+        self.emit_constant(Value::Number(value));
         Ok(())
     }
 
-    fn parse_additive(&mut self) -> Result<(), String> {
-        self.parse_multiplicative()?;
-
-        while matches!(self.peek().kind, TokenKind::Plus | TokenKind::Minus) {
-            let operator = self.advance().kind;
-            self.parse_multiplicative()?;
-
-            match operator {
-                TokenKind::Plus => self.emit(OP_ADD),
-                TokenKind::Minus => self.emit(OP_SUBTRACT),
-                _ => unreachable!(),
-            }
+    fn parse_literal(&mut self) -> Result<(), String> {
+        match self.previous().kind {
+            TokenKind::True => self.emit(OP_TRUE),
+            TokenKind::False => self.emit(OP_FALSE),
+            TokenKind::Nil => self.emit(OP_NIL),
+            _ => unreachable!(),
         }
-
         Ok(())
     }
 
-    fn parse_multiplicative(&mut self) -> Result<(), String> {
-        self.parse_unary()?;
-
-        while matches!(self.peek().kind, TokenKind::Star | TokenKind::Slash) {
-            let operator = self.advance().kind;
-            self.parse_unary()?;
-
-            match operator {
-                TokenKind::Star => self.emit(OP_MULTIPLY),
-                TokenKind::Slash => self.emit(OP_DIVIDE),
-                _ => unreachable!(),
-            }
-        }
-
-        Ok(())
+    fn parse_grouping(&mut self) -> Result<(), String> {
+        self.expression()?;
+        self.consume(TokenKind::RightParen, "Expected ')' after expression.")
     }
 
     fn parse_unary(&mut self) -> Result<(), String> {
-        if matches!(self.peek().kind, TokenKind::Minus | TokenKind::Bang) {
-            let operator = self.advance().kind;
-            self.parse_unary()?;
-            match operator {
-                TokenKind::Minus => self.emit(OP_NEGATE),
-                TokenKind::Bang => self.emit(OP_NOT),
-                _ => unreachable!(),
-            }
-            return Ok(());
+        let operator = self.previous().kind;
+        self.parse_precedence(Precedence::Unary)?;
+        match operator {
+            TokenKind::Minus => self.emit(OP_NEGATE),
+            TokenKind::Bang => self.emit(OP_NOT),
+            _ => unreachable!(),
         }
-
-        self.parse_primary()
+        Ok(())
     }
 
-    fn parse_primary(&mut self) -> Result<(), String> {
-        match self.peek().kind {
-            TokenKind::Number => {
-                let number = self.advance();
-                let value = number
-                    .lexeme
-                    .parse::<f64>()
-                    .map_err(|_| format!("Compile error: invalid number '{}'.", number.lexeme))?;
-                self.emit_constant(Value::Number(value));
-                Ok(())
+    fn parse_binary(&mut self) -> Result<(), String> {
+        let operator = self.previous().kind;
+        let precedence = get_rule(operator).precedence;
+        self.parse_precedence(precedence.next())?;
+
+        match operator {
+            TokenKind::Or => self.emit(OP_OR),
+            TokenKind::And => self.emit(OP_AND),
+            TokenKind::Plus => self.emit(OP_ADD),
+            TokenKind::Minus => self.emit(OP_SUBTRACT),
+            TokenKind::Star => self.emit(OP_MULTIPLY),
+            TokenKind::Slash => self.emit(OP_DIVIDE),
+            TokenKind::EqualEqual => self.emit(OP_EQUAL),
+            TokenKind::BangEqual => {
+                self.emit(OP_EQUAL);
+                self.emit(OP_NOT);
             }
-            TokenKind::True => {
-                self.advance();
-                self.emit(OP_TRUE);
-                Ok(())
+            TokenKind::Greater => self.emit(OP_GREATER),
+            TokenKind::GreaterEqual => {
+                self.emit(OP_LESS);
+                self.emit(OP_NOT);
             }
-            TokenKind::False => {
-                self.advance();
-                self.emit(OP_FALSE);
-                Ok(())
+            TokenKind::Less => self.emit(OP_LESS),
+            TokenKind::LessEqual => {
+                self.emit(OP_GREATER);
+                self.emit(OP_NOT);
             }
-            TokenKind::Nil => {
-                self.advance();
-                self.emit(OP_NIL);
-                Ok(())
-            }
-            TokenKind::LeftParen => {
-                self.advance();
-                self.expression()?;
-                self.consume(TokenKind::RightParen, "Expected ')' after expression.")?;
-                Ok(())
-            }
-            _ => Err(format!(
-                "Compile error: expected expression, found '{}'.",
-                self.peek().lexeme
-            )),
+            _ => unreachable!(),
         }
+        Ok(())
     }
 
     fn emit_constant(&mut self, value: Value) {
@@ -234,6 +282,10 @@ impl<'a> Parser<'a> {
         let token = *self.peek();
         self.current += 1;
         token
+    }
+
+    fn previous(&self) -> &Token<'a> {
+        &self.tokens[self.current - 1]
     }
 
     fn consume(&mut self, expected: TokenKind, message: &str) -> Result<(), String> {
