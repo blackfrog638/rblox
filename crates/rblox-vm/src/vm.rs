@@ -63,14 +63,10 @@ impl VM {
                     self.push(Value::Bool(left == right));
                 }
                 OP_GREATER => {
-                    self.binary_number_op("Operands must be numbers.", |a, b| {
-                        if a > b { 1.0 } else { 0.0 }
-                    })?;
+                    self.binary_bool_op("Operands must be numbers.", |a, b| a > b)?;
                 }
                 OP_LESS => {
-                    self.binary_number_op("Operands must be numbers.", |a, b| {
-                        if a < b { 1.0 } else { 0.0 }
-                    })?;
+                    self.binary_bool_op("Operands must be numbers.", |a, b| a < b)?;
                 }
                 OP_AND => {
                     let right = self.pop()?;
@@ -182,6 +178,21 @@ impl VM {
         Ok(())
     }
 
+    fn binary_bool_op<F>(&mut self, error_message: &str, operation: F) -> Result<(), String>
+    where
+        F: FnOnce(f64, f64) -> bool,
+    {
+        let right = self.pop()?;
+        let left = self.pop()?;
+
+        let (Value::Number(a), Value::Number(b)) = (left, right) else {
+            return Err(self.runtime_error(error_message));
+        };
+
+        self.push(Value::Bool(operation(a, b)));
+        Ok(())
+    }
+
     fn runtime_error(&self, message: &str) -> String {
         let line = self.chunk.line_at(self.ip.saturating_sub(1)).unwrap_or(0);
         format!("{}\n[line {}] in script", message, line)
@@ -257,6 +268,18 @@ mod tests {
                 .expect_err("expected runtime error")
                 .contains("Operand must be a number.")
         );
+    }
+
+    #[test]
+    fn binary_bool_op_returns_boolean_for_comparison() {
+        let mut vm = VM::new();
+        vm.push(Value::Number(2.0));
+        vm.push(Value::Number(1.0));
+
+        vm.binary_bool_op("Operands must be numbers.", |a, b| a > b)
+            .unwrap();
+
+        assert_eq!(vm.pop().unwrap(), Value::Bool(true));
     }
 
     #[test]
