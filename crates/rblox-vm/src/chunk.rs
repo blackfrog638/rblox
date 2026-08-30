@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 pub const OP_CONSTANT: u8 = 0;
 pub const OP_NIL: u8 = 1;
@@ -18,11 +18,79 @@ pub const OP_NEGATE: u8 = 14;
 pub const OP_PRINT: u8 = 15;
 pub const OP_RETURN: u8 = 16;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjType {
+    String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Number(f64),
     Bool(bool),
     Nil,
+    Obj(Rc<Object>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Object {
+    String(String),
+}
+
+impl Object {
+    pub fn obj_type(&self) -> ObjType {
+        match self {
+            Object::String(_) => ObjType::String,
+        }
+    }
+}
+
+impl Value {
+    pub fn is_obj_type(&self, obj_type: ObjType) -> bool {
+        match self {
+            Value::Obj(obj) => obj.obj_type() == obj_type,
+            _ => false,
+        }
+    }
+
+    pub fn as_obj(&self) -> Option<&Object> {
+        match self {
+            Value::Obj(obj) => Some(obj.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&String> {
+        match self {
+            Value::Obj(obj) => match obj.as_ref() {
+                Object::String(s) => Some(s),
+            },
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Object::String(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+pub fn is_obj_type(value: &Value, obj_type: ObjType) -> bool {
+    value.is_obj_type(obj_type)
+}
+
+pub fn as_string(value: &Value) -> Option<&String> {
+    value.as_string()
+}
+
+pub fn as_str(value: &Value) -> Option<&str> {
+    value.as_string().map(String::as_str)
+}
+
+pub fn allocate_string(value: String) -> Value {
+    Value::Obj(Rc::new(Object::String(value)))
 }
 
 impl fmt::Display for Value {
@@ -31,6 +99,7 @@ impl fmt::Display for Value {
             Value::Number(value) => write!(f, "{}", value),
             Value::Bool(value) => write!(f, "{}", value),
             Value::Nil => write!(f, "nil"),
+            Value::Obj(value) => write!(f, "{}", value),
         }
     }
 }
