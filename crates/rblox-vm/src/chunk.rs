@@ -31,19 +31,6 @@ pub enum Value {
     Obj(Rc<Object>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Object {
-    String(String),
-}
-
-impl Object {
-    pub fn obj_type(&self) -> ObjType {
-        match self {
-            Object::String(_) => ObjType::String,
-        }
-    }
-}
-
 impl Value {
     pub fn is_obj_type(&self, obj_type: ObjType) -> bool {
         match self {
@@ -65,6 +52,19 @@ impl Value {
                 Object::String(s) => Some(s),
             },
             _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Object {
+    String(String),
+}
+
+impl Object {
+    pub fn obj_type(&self) -> ObjType {
+        match self {
+            Object::String(_) => ObjType::String,
         }
     }
 }
@@ -161,7 +161,6 @@ impl Chunk {
                 return Some(run.line);
             }
         }
-
         None
     }
 }

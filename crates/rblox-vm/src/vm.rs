@@ -83,7 +83,30 @@ impl VM {
                     ));
                 }
                 OP_ADD => {
-                    self.binary_number_op("Operands must be numbers.", |a, b| a + b)?;
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+
+                    match (left, right) {
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.push(Value::Number(a + b));
+                        }
+                        (Value::Obj(left_obj), Value::Obj(right_obj)) => {
+                            match (left_obj.as_ref(), right_obj.as_ref()) {
+                                (
+                                    crate::chunk::Object::String(left_value),
+                                    crate::chunk::Object::String(right_value),
+                                ) => {
+                                    self.push(Value::Obj(std::rc::Rc::new(
+                                        crate::chunk::Object::String(format!(
+                                            "{}{}",
+                                            left_value, right_value
+                                        )),
+                                    )));
+                                }
+                            }
+                        }
+                        _ => return Err(self.runtime_error("Operands must be numbers or strings.")),
+                    }
                 }
                 OP_SUBTRACT => {
                     self.binary_number_op("Operands must be numbers.", |a, b| a - b)?;
@@ -280,6 +303,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(vm.pop().unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn run_executes_string_addition_program() {
+        let mut chunk = Chunk::new();
+        let left = chunk.add_constant(Value::Obj(std::rc::Rc::new(crate::chunk::Object::String(
+            "hello".to_string(),
+        ))));
+        let right = chunk.add_constant(Value::Obj(std::rc::Rc::new(crate::chunk::Object::String(
+            " world".to_string(),
+        ))));
+
+        chunk.write(OP_CONSTANT, 1);
+        chunk.write(left, 1);
+        chunk.write(OP_CONSTANT, 1);
+        chunk.write(right, 1);
+        chunk.write(OP_ADD, 1);
+        chunk.write(OP_RETURN, 1);
+
+        let mut vm = VM::new();
+        let result = vm.interpret_chunk(chunk);
+
+        assert!(result.is_ok());
+        assert_eq!(vm.stack.len(), 0);
     }
 
     #[test]
