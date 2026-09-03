@@ -7,13 +7,14 @@ const MAX_LOAD: usize = 75;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub key: Option<Rc<Object>>,
-    pub value: Value,
+    pub value: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Table {
     entries: Vec<Entry>,
     count: usize,
+    active_count: usize,
 }
 
 impl Table {
@@ -21,15 +22,16 @@ impl Table {
         Self {
             entries: Vec::new(),
             count: 0,
+            active_count: 0,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.count
+        self.active_count
     }
 
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.active_count == 0
     }
 
     pub fn capacity(&self) -> usize {
@@ -43,7 +45,7 @@ impl Table {
 
         let index = self.find_entry(key)?;
         self.entries[index].key.as_ref()?;
-        Some(&self.entries[index].value)
+        self.entries[index].value.as_ref()
     }
 
     pub fn find_string(&self, value: &str, hash: u32) -> Option<Rc<Object>> {
@@ -56,7 +58,11 @@ impl Table {
             let entry = &self.entries[index];
             match &entry.key {
                 None => return None,
-                Some(key) if key.string_hash() == hash && key.string_value() == Some(value) => {
+                Some(key)
+                    if entry.value.is_some()
+                        && key.string_hash() == hash
+                        && key.string_value() == Some(value) =>
+                {
                     return Some(key.clone());
                 }
                 Some(_) => {}
@@ -71,13 +77,16 @@ impl Table {
         }
 
         let index = self.find_insert_index(&key);
-        let is_new_key = self.entries[index].key.is_none();
-        if is_new_key {
+        let is_new_key = self.entries[index].value.is_none();
+        if self.entries[index].key.is_none() {
             self.count += 1;
+        }
+        if is_new_key {
+            self.active_count += 1;
         }
         self.entries[index] = Entry {
             key: Some(key),
-            value,
+            value: Some(value),
         };
         is_new_key
     }
@@ -87,15 +96,15 @@ impl Table {
             return false;
         };
 
-        self.entries[index].key = Some(key.clone());
-        self.entries[index].value = Value::Nil;
-        self.count -= 1;
+        self.entries[index].value = None;
+        self.active_count -= 1;
         true
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
         self.count = 0;
+        self.active_count = 0;
     }
 
     fn find_entry(&self, key: &Rc<Object>) -> Option<usize> {
@@ -108,7 +117,7 @@ impl Table {
             let entry = &self.entries[index];
             match &entry.key {
                 None => return None,
-                Some(_) if entry.value == Value::Nil => {}
+                Some(_) if entry.value.is_none() => {}
                 Some(entry_key) if entry_key.as_ref() == key.as_ref() => return Some(index),
                 Some(_) => {}
             }
@@ -124,7 +133,7 @@ impl Table {
             let entry = &self.entries[index];
             match &entry.key {
                 None => return tombstone.unwrap_or(index),
-                Some(entry_key) if entry.value == Value::Nil => {
+                Some(_) if entry.value.is_none() => {
                     tombstone.get_or_insert(index);
                 }
                 Some(entry_key) if entry_key.as_ref() == key.as_ref() => return index,
@@ -139,21 +148,21 @@ impl Table {
         self.entries = (0..capacity)
             .map(|_| Entry {
                 key: None,
-                value: Value::Nil,
+                value: None,
             })
             .collect();
         self.count = 0;
+        self.active_count = 0;
 
         for entry in old_entries {
-            if let Some(key) = entry.key {
-                if entry.value != Value::Nil {
-                    let index = self.find_insert_index(&key);
-                    self.entries[index] = Entry {
-                        key: Some(key),
-                        value: entry.value,
-                    };
-                    self.count += 1;
-                }
+            if let (Some(key), Some(value)) = (entry.key, entry.value) {
+                let index = self.find_insert_index(&key);
+                self.entries[index] = Entry {
+                    key: Some(key),
+                    value: Some(value),
+                };
+                self.count += 1;
+                self.active_count += 1;
             }
         }
     }
@@ -201,6 +210,16 @@ mod tests {
     }
 
     #[test]
+    fn stores_real_nil_without_confusing_it_with_tombstone() {
+        let mut table = Table::new();
+        let stored = key("nil-value");
+
+        assert!(table.set(stored.clone(), Value::Nil));
+        assert_eq!(table.get(&stored), Some(&Value::Nil));
+        assert_eq!(table.len(), 1);
+    }
+
+    #[test]
     fn delete_preserves_probe_sequence_with_tombstone() {
         let mut table = Table::new();
         let first = key("a");
@@ -210,6 +229,7 @@ mod tests {
 
         assert!(table.delete(&first));
         assert_eq!(table.get(&second), Some(&Value::Number(2.0)));
+        assert_eq!(table.len(), 1);
         assert!(!table.delete(&first));
     }
 
