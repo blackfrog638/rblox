@@ -1,9 +1,9 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_RETURN, OP_SUBTRACT, OP_TRUE, Object, Value,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_RETURN, OP_SUBTRACT, OP_TRUE, Value,
+    allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
-use std::rc::Rc;
 
 pub fn compile(source: &str) -> Result<Chunk, String> {
     let mut scanner = Scanner::new(source);
@@ -220,7 +220,7 @@ impl<'a> Parser<'a> {
         let string_token = self.previous();
         let string_value =
             string_token.lexeme.to_string()[1..string_token.lexeme.len() - 1].to_string(); // Remove the surrounding quotes
-        self.emit_constant(Value::Obj(Rc::new(Object::String(string_value))));
+        self.emit_constant(allocate_string(string_value));
         Ok(())
     }
 

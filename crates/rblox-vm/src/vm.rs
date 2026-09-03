@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
     OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN, OP_SUBTRACT, OP_TRUE,
-    Value, disassemble_instruction,
+    Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
 
@@ -91,19 +91,14 @@ impl VM {
                             self.push(Value::Number(a + b));
                         }
                         (Value::Obj(left_obj), Value::Obj(right_obj)) => {
-                            match (left_obj.as_ref(), right_obj.as_ref()) {
-                                (
-                                    crate::chunk::Object::String(left_value),
-                                    crate::chunk::Object::String(right_value),
-                                ) => {
-                                    self.push(Value::Obj(std::rc::Rc::new(
-                                        crate::chunk::Object::String(format!(
-                                            "{}{}",
-                                            left_value, right_value
-                                        )),
-                                    )));
-                                }
-                            }
+                            let (Some(left_value), Some(right_value)) =
+                                (left_obj.string_value(), right_obj.string_value())
+                            else {
+                                return Err(
+                                    self.runtime_error("Operands must be numbers or strings.")
+                                );
+                            };
+                            self.push(allocate_string(format!("{}{}", left_value, right_value)));
                         }
                         _ => return Err(self.runtime_error("Operands must be numbers or strings.")),
                     }
@@ -308,12 +303,8 @@ mod tests {
     #[test]
     fn run_executes_string_addition_program() {
         let mut chunk = Chunk::new();
-        let left = chunk.add_constant(Value::Obj(std::rc::Rc::new(crate::chunk::Object::String(
-            "hello".to_string(),
-        ))));
-        let right = chunk.add_constant(Value::Obj(std::rc::Rc::new(crate::chunk::Object::String(
-            " world".to_string(),
-        ))));
+        let left = chunk.add_constant(allocate_string("hello".to_string()));
+        let right = chunk.add_constant(allocate_string(" world".to_string()));
 
         chunk.write(OP_CONSTANT, 1);
         chunk.write(left, 1);

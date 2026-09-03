@@ -49,7 +49,7 @@ impl Value {
     pub fn as_string(&self) -> Option<&String> {
         match self {
             Value::Obj(obj) => match obj.as_ref() {
-                Object::String(s) => Some(s),
+                Object::String { value, .. } => Some(value),
             },
             _ => None,
         }
@@ -58,13 +58,25 @@ impl Value {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Object {
-    String(String),
+    String { value: String, hash: u32 },
 }
 
 impl Object {
     pub fn obj_type(&self) -> ObjType {
         match self {
-            Object::String(_) => ObjType::String,
+            Object::String { .. } => ObjType::String,
+        }
+    }
+
+    pub fn string_hash(&self) -> u32 {
+        match self {
+            Object::String { hash, .. } => *hash,
+        }
+    }
+
+    pub fn string_value(&self) -> Option<&str> {
+        match self {
+            Object::String { value, .. } => Some(value),
         }
     }
 }
@@ -72,7 +84,7 @@ impl Object {
 impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Object::String(s) => write!(f, "{}", s),
+            Object::String { value, .. } => write!(f, "{}", value),
         }
     }
 }
@@ -90,7 +102,16 @@ pub fn as_str(value: &Value) -> Option<&str> {
 }
 
 pub fn allocate_string(value: String) -> Value {
-    Value::Obj(Rc::new(Object::String(value)))
+    Value::Obj(Rc::new(Object::String {
+        hash: hash_string(&value),
+        value,
+    }))
+}
+
+pub fn hash_string(value: &str) -> u32 {
+    value.bytes().fold(2166136261, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(16777619)
+    })
 }
 
 impl fmt::Display for Value {
