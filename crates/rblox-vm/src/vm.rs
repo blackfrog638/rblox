@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN, OP_SUBTRACT, OP_TRUE,
-    Value, allocate_string, disassemble_instruction,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SUBTRACT,
+    OP_TRUE, Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
 
@@ -131,6 +131,9 @@ impl VM {
                     let value = self.pop()?;
                     println!("{}", value);
                     return Ok(());
+                }
+                OP_POP => {
+                    self.pop()?;
                 }
                 _ => {
                     return Err(format!(

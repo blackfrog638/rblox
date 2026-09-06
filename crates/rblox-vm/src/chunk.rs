@@ -17,6 +17,7 @@ pub const OP_NOT: u8 = 13;
 pub const OP_NEGATE: u8 = 14;
 pub const OP_PRINT: u8 = 15;
 pub const OP_RETURN: u8 = 16;
+pub const OP_POP: u8 = 17;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {

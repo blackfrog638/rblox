@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_RETURN, OP_SUBTRACT, OP_TRUE, Value,
-    allocate_string,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN, OP_SUBTRACT, OP_TRUE,
+    Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -23,8 +23,14 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
     }
 
     let mut parser = Parser::new(&tokens);
-    parser.expression()?;
-    parser.consume(TokenKind::Eof, "Expected end of expression.")?;
+
+    loop {
+        parser.declaration()?;
+        if matches!(parser.peek().kind, TokenKind::Eof) {
+            break;
+        }
+    }
+
     parser.emit_return();
     Ok(parser.chunk)
 }
@@ -163,6 +169,34 @@ impl<'a> Parser<'a> {
             current: 0,
             chunk: Chunk::new(),
         }
+    }
+
+    fn declaration(&mut self) -> Result<(), String> {
+        self.statement()
+    }
+
+    fn statement(&mut self) -> Result<(), String> {
+        let token = self.peek();
+        match token.kind {
+            TokenKind::Print => {
+                self.advance();
+                self.print_statement()
+            }
+            _ => self.expression_statement(),
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<(), String> {
+        self.expression()?;
+        self.consume(TokenKind::Semicolon, "Expected ';' after value.")?;
+        self.emit(OP_PRINT);
+        Ok(())
+    }
+
+    fn expression_statement(&mut self) -> Result<(), String> {
+        self.expression()?;
+        self.consume(TokenKind::Semicolon, "Expected ';' after expression.")?;
+        Ok(())
     }
 
     fn expression(&mut self) -> Result<(), String> {
