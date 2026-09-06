@@ -24,11 +24,17 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
 
     let mut parser = Parser::new(&tokens);
 
-    loop {
-        parser.declaration()?;
-        if matches!(parser.peek().kind, TokenKind::Eof) {
-            break;
+    let mut first_error = None;
+    while !matches!(parser.peek().kind, TokenKind::Eof) {
+        if let Err(error) = parser.declaration() {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
         }
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
     }
 
     parser.emit_return();
@@ -160,6 +166,7 @@ struct Parser<'a> {
     tokens: &'a [Token<'a>],
     current: usize,
     chunk: Chunk,
+    panic_mode: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -168,11 +175,43 @@ impl<'a> Parser<'a> {
             tokens,
             current: 0,
             chunk: Chunk::new(),
+            panic_mode: false,
         }
     }
 
     fn declaration(&mut self) -> Result<(), String> {
-        self.statement()
+        let result = self.statement();
+        if result.is_err() {
+            self.panic_mode = true;
+        }
+        if self.panic_mode {
+            self.synchronize();
+        }
+        result
+    }
+
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+
+        while !matches!(self.peek().kind, TokenKind::Eof) {
+            if self.previous().kind == TokenKind::Semicolon {
+                return;
+            }
+
+            match self.peek().kind {
+                TokenKind::Class
+                | TokenKind::Fun
+                | TokenKind::Var
+                | TokenKind::For
+                | TokenKind::If
+                | TokenKind::Print
+                | TokenKind::Return
+                | TokenKind::While => return,
+                _ => {
+                    self.advance();
+                }
+            }
+        }
     }
 
     fn statement(&mut self) -> Result<(), String> {
