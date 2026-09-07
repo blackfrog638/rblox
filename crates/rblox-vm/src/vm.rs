@@ -1,14 +1,16 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SUBTRACT,
-    OP_TRUE, Value, allocate_string, disassemble_instruction,
+    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
+    OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT,
+    OP_RETURN, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
+use crate::table::Table;
 
 pub struct VM {
     chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
+    globals: Table,
     trace_execution: bool,
 }
 
@@ -18,6 +20,7 @@ impl VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::new(),
+            globals: Table::new(),
             trace_execution: false,
         }
     }
@@ -57,6 +60,11 @@ impl VM {
                 OP_NIL => self.push(Value::Nil),
                 OP_TRUE => self.push(Value::Bool(true)),
                 OP_FALSE => self.push(Value::Bool(false)),
+                OP_DEFINE_GLOBAL => {
+                    let name = self.read_constant_string()?;
+                    let value = self.pop()?;
+                    self.globals.set(name, value);
+                }
                 OP_EQUAL => {
                     let right = self.pop()?;
                     let left = self.pop()?;
@@ -168,6 +176,17 @@ impl VM {
                     self.ip.saturating_sub(1)
                 )
             })
+    }
+
+    fn read_constant_string(&mut self) -> Result<std::rc::Rc<Object>, String> {
+        let value = self.read_constant()?;
+        let Value::Obj(object) = value else {
+            return Err(self.runtime_error("Global name must be a string."));
+        };
+        if object.string_value().is_none() {
+            return Err(self.runtime_error("Global name must be a string."));
+        }
+        Ok(object)
     }
 
     fn reset_stack(&mut self) {

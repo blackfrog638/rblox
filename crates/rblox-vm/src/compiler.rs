@@ -1,7 +1,7 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GREATER, OP_LESS,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN, OP_SUBTRACT, OP_TRUE,
-    Value, allocate_string,
+    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
+    OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN,
+    OP_SUBTRACT, OP_TRUE, Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -180,7 +180,13 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) -> Result<(), String> {
-        let result = self.statement();
+        let result = if self.match_token(TokenKind::Var) {
+            self.var_declaration()
+        } else {
+            let result = self.statement();
+            result
+        };
+
         if result.is_err() {
             self.panic_mode = true;
         }
@@ -190,11 +196,44 @@ impl<'a> Parser<'a> {
         result
     }
 
+    fn var_declaration(&mut self) -> Result<(), String> {
+        let global = self.parse_variable("Expect variable name.")?;
+
+        if self.match_token(TokenKind::Equal) {
+            self.expression()?;
+        } else {
+            self.emit(OP_NIL);
+        }
+
+        self.consume(
+            TokenKind::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+
+        self.define_variable(global);
+        Ok(())
+    }
+
+    fn parse_variable(&mut self, message: &str) -> Result<u8, String> {
+        if self.peek().kind != TokenKind::Identifier {
+            return Err(format!("Compile error: {}", message));
+        }
+
+        let name = self.advance();
+        let name_value = allocate_string(name.lexeme.to_string());
+        Ok(self.chunk.add_constant(name_value))
+    }
+
+    fn define_variable(&mut self, global: u8) {
+        self.chunk.write(OP_DEFINE_GLOBAL, 1);
+        self.chunk.write(global, 1);
+    }
+
     fn synchronize(&mut self) {
         self.panic_mode = false;
 
         while !matches!(self.peek().kind, TokenKind::Eof) {
-            if self.previous().kind == TokenKind::Semicolon {
+            if self.match_token(TokenKind::Semicolon) {
                 return;
             }
 
@@ -215,13 +254,10 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<(), String> {
-        let token = self.peek();
-        match token.kind {
-            TokenKind::Print => {
-                self.advance();
-                self.print_statement()
-            }
-            _ => self.expression_statement(),
+        if self.match_token(TokenKind::Print) {
+            self.print_statement()
+        } else {
+            self.expression_statement()
         }
     }
 
@@ -377,9 +413,17 @@ impl<'a> Parser<'a> {
         &self.tokens[self.current - 1]
     }
 
+    fn match_token(&mut self, expected: TokenKind) -> bool {
+        if self.peek().kind != expected {
+            return false;
+        }
+
+        self.advance();
+        true
+    }
+
     fn consume(&mut self, expected: TokenKind, message: &str) -> Result<(), String> {
-        if self.peek().kind == expected {
-            self.current += 1;
+        if self.match_token(expected) {
             return Ok(());
         }
 
@@ -393,31 +437,38 @@ mod tests {
 
     #[test]
     fn compile_accepts_number_literal() {
-        let chunk = compile("3.14").expect("number literal should compile");
+        let chunk = compile("3.14;").expect("number literal should compile");
         assert_eq!(chunk.code.len(), 3);
     }
 
     #[test]
     fn compile_handles_simple_binary_expression() {
-        let chunk = compile("1 + 2").expect("simple expression should compile");
+        let chunk = compile("1 + 2;").expect("simple expression should compile");
         assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 16]);
     }
 
     #[test]
     fn compile_respects_operator_precedence() {
-        let chunk = compile("1 + 2 * 3").expect("precedence should compile");
+        let chunk = compile("1 + 2 * 3;").expect("precedence should compile");
         assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 16]);
     }
 
     #[test]
     fn compile_supports_boolean_and_nil_literals() {
-        let chunk = compile("true and false or nil").expect("boolean and nil should compile");
+        let chunk = compile("true and false or nil;").expect("boolean and nil should compile");
         assert_eq!(chunk.code.len(), 6);
     }
 
     #[test]
     fn compile_supports_equality_and_comparison() {
-        let chunk = compile("1 < 2 == true").expect("comparison should compile");
+        let chunk = compile("1 < 2 == true;").expect("comparison should compile");
         assert_eq!(chunk.code.len(), 8);
+    }
+
+    #[test]
+    fn compile_defines_global_variable() {
+        let chunk = compile("var breakfast = \"beignets\";").expect("variable should compile");
+        assert_eq!(chunk.code, vec![0, 1, 18, 0, 16]);
+        assert_eq!(chunk.constants.len(), 2);
     }
 }

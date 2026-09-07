@@ -18,6 +18,7 @@ pub const OP_NEGATE: u8 = 14;
 pub const OP_PRINT: u8 = 15;
 pub const OP_RETURN: u8 = 16;
 pub const OP_POP: u8 = 17;
+pub const OP_DEFINE_GLOBAL: u8 = 18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
@@ -207,7 +208,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
     let instruction = chunk.code[offset];
 
     match instruction {
-        OP_CONSTANT => constant_instruction(chunk, offset, &prefix),
+        OP_CONSTANT => constant_instruction(chunk, offset, &prefix, "OP_CONSTANT"),
         OP_NIL => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
             (line, offset + 1)
@@ -268,6 +269,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             let line = format!("{}{}", prefix, simple_instruction("OP_PRINT"));
             (line, offset + 1)
         }
+        OP_DEFINE_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_DEFINE_GLOBAL"),
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)
@@ -293,10 +295,10 @@ fn simple_instruction(name: &str) -> String {
     name.to_string()
 }
 
-fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str) -> (String, usize) {
+fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (String, usize) {
     let Some(index) = chunk.code.get(offset + 1).copied() else {
         return (
-            format!("{}OP_CONSTANT <missing constant index>", prefix),
+            format!("{}{} <missing constant index>", prefix, name),
             offset + 1,
         );
     };
@@ -308,7 +310,7 @@ fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str) -> (String, 
         .unwrap_or_else(|| "<invalid constant index>".to_string());
 
     (
-        format!("{}OP_CONSTANT {:4} {}", prefix, index, value_text),
+        format!("{}{} {:4} {}", prefix, name, index, value_text),
         offset + 2,
     )
 }
