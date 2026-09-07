@@ -19,6 +19,8 @@ pub const OP_PRINT: u8 = 15;
 pub const OP_RETURN: u8 = 16;
 pub const OP_POP: u8 = 17;
 pub const OP_DEFINE_GLOBAL: u8 = 18;
+pub const OP_GET_GLOBAL: u8 = 19;
+pub const OP_SET_GLOBAL: u8 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
@@ -270,6 +272,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             (line, offset + 1)
         }
         OP_DEFINE_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_DEFINE_GLOBAL"),
+        OP_GET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_GET_GLOBAL"),
+        OP_SET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_SET_GLOBAL"),
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)

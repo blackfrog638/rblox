@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_PRINT, OP_RETURN,
-    OP_SUBTRACT, OP_TRUE, Value, allocate_string,
+    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR,
+    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -53,6 +53,7 @@ enum PrefixRule {
     Number,
     String,
     Literal,
+    Identifier,
 }
 
 enum InfixRule {
@@ -151,6 +152,11 @@ fn get_rule(kind: TokenKind) -> ParseRule {
         },
         TokenKind::String => ParseRule {
             prefix: Some(PrefixRule::String),
+            infix: None,
+            precedence: Precedence::None,
+        },
+        TokenKind::Identifier => ParseRule {
+            prefix: Some(PrefixRule::Identifier),
             infix: None,
             precedence: Precedence::None,
         },
@@ -292,6 +298,7 @@ impl<'a> Parser<'a> {
             PrefixRule::Number => self.parse_number()?,
             PrefixRule::Literal => self.parse_literal()?,
             PrefixRule::String => self.parse_string()?,
+            PrefixRule::Identifier => self.parse_variable_expression(precedence)?,
         }
 
         while precedence <= get_rule(self.peek().kind).precedence {
@@ -300,6 +307,22 @@ impl<'a> Parser<'a> {
             match rule.infix.expect("infix rule must have a parser") {
                 InfixRule::Binary => self.parse_binary()?,
             }
+        }
+
+        Ok(())
+    }
+
+    fn parse_variable_expression(&mut self, precedence: Precedence) -> Result<(), String> {
+        let name = self.previous().lexeme.to_string();
+        let global = self.chunk.add_constant(allocate_string(name));
+
+        if precedence <= Precedence::Assignment && self.match_token(TokenKind::Equal) {
+            self.expression()?;
+            self.emit(OP_SET_GLOBAL);
+            self.chunk.write(global, 1);
+        } else {
+            self.emit(OP_GET_GLOBAL);
+            self.chunk.write(global, 1);
         }
 
         Ok(())
@@ -470,5 +493,11 @@ mod tests {
         let chunk = compile("var breakfast = \"beignets\";").expect("variable should compile");
         assert_eq!(chunk.code, vec![0, 1, 18, 0, 16]);
         assert_eq!(chunk.constants.len(), 2);
+    }
+
+    #[test]
+    fn compile_reads_and_assigns_global_variable() {
+        let chunk = compile("var a = 1; a = 2; print a;").expect("variables should compile");
+        assert_eq!(chunk.code, vec![0, 1, 18, 0, 0, 3, 20, 2, 19, 4, 15, 16]);
     }
 }

@@ -1,7 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT,
-    OP_RETURN, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
+    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP,
+    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string,
+    disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::table::Table;
@@ -63,6 +64,27 @@ impl VM {
                 OP_DEFINE_GLOBAL => {
                     let name = self.read_constant_string()?;
                     let value = self.pop()?;
+                    self.globals.set(name, value);
+                }
+                OP_GET_GLOBAL => {
+                    let name = self.read_constant_string()?;
+                    let value = self
+                        .globals
+                        .get(&name)
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Undefined variable."))?;
+                    self.push(value);
+                }
+                OP_SET_GLOBAL => {
+                    let name = self.read_constant_string()?;
+                    let value = self
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    if self.globals.get(&name).is_none() {
+                        return Err(self.runtime_error("Undefined variable."));
+                    }
                     self.globals.set(name, value);
                 }
                 OP_EQUAL => {
@@ -136,7 +158,7 @@ impl VM {
                     println!("{}", value);
                 }
                 OP_RETURN => {
-                    let value = self.pop()?;
+                    let value = self.pop().unwrap_or(Value::Nil);
                     println!("{}", value);
                     return Ok(());
                 }
@@ -355,5 +377,19 @@ mod tests {
 
         let result = vm.interpret_chunk(chunk);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn interpret_reads_and_assigns_global_variable() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret("var a = 1; a = 2;");
+
+        assert!(result.is_ok());
+        let name = match allocate_string("a".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&name), Some(&Value::Number(2.0)));
     }
 }
