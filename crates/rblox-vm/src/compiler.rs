@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
     OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR,
-    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Value, allocate_string,
+    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, OP_POP, Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -277,6 +277,7 @@ impl<'a> Parser<'a> {
     fn expression_statement(&mut self) -> Result<(), String> {
         self.expression()?;
         self.consume(TokenKind::Semicolon, "Expected ';' after expression.")?;
+        self.emit(OP_POP);
         Ok(())
     }
 
@@ -285,6 +286,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), String> {
+        let can_assign = precedence <= Precedence::Assignment;
         let token = self.advance();
         let prefix = get_rule(token.kind).prefix.ok_or_else(|| {
             format!(
@@ -298,7 +300,7 @@ impl<'a> Parser<'a> {
             PrefixRule::Number => self.parse_number()?,
             PrefixRule::Literal => self.parse_literal()?,
             PrefixRule::String => self.parse_string()?,
-            PrefixRule::Identifier => self.parse_variable_expression(precedence)?,
+            PrefixRule::Identifier => self.parse_variable_expression(can_assign)?,
         }
 
         while precedence <= get_rule(self.peek().kind).precedence {
@@ -309,14 +311,19 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if can_assign && self.match_token(TokenKind::Equal) {
+            self.expression()?;
+            return Err("Compile error: Invalid assignment target.".to_string());
+        }
+
         Ok(())
     }
 
-    fn parse_variable_expression(&mut self, precedence: Precedence) -> Result<(), String> {
+    fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
         let global = self.chunk.add_constant(allocate_string(name));
 
-        if precedence <= Precedence::Assignment && self.match_token(TokenKind::Equal) {
+        if can_assign && self.match_token(TokenKind::Equal) {
             self.expression()?;
             self.emit(OP_SET_GLOBAL);
             self.chunk.write(global, 1);
@@ -461,31 +468,31 @@ mod tests {
     #[test]
     fn compile_accepts_number_literal() {
         let chunk = compile("3.14;").expect("number literal should compile");
-        assert_eq!(chunk.code.len(), 3);
+        assert_eq!(chunk.code.len(), 4);
     }
 
     #[test]
     fn compile_handles_simple_binary_expression() {
         let chunk = compile("1 + 2;").expect("simple expression should compile");
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 16]);
+        assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 17, 16]);
     }
 
     #[test]
     fn compile_respects_operator_precedence() {
         let chunk = compile("1 + 2 * 3;").expect("precedence should compile");
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 16]);
+        assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 17, 16]);
     }
 
     #[test]
     fn compile_supports_boolean_and_nil_literals() {
         let chunk = compile("true and false or nil;").expect("boolean and nil should compile");
-        assert_eq!(chunk.code.len(), 6);
+        assert_eq!(chunk.code.len(), 7);
     }
 
     #[test]
     fn compile_supports_equality_and_comparison() {
         let chunk = compile("1 < 2 == true;").expect("comparison should compile");
-        assert_eq!(chunk.code.len(), 8);
+        assert_eq!(chunk.code.len(), 9);
     }
 
     #[test]
@@ -498,6 +505,18 @@ mod tests {
     #[test]
     fn compile_reads_and_assigns_global_variable() {
         let chunk = compile("var a = 1; a = 2; print a;").expect("variables should compile");
-        assert_eq!(chunk.code, vec![0, 1, 18, 0, 0, 3, 20, 2, 19, 4, 15, 16]);
+        assert_eq!(chunk.code, vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, 16]);
+    }
+
+    #[test]
+    fn assignment_has_lower_precedence_and_is_right_associative() {
+        assert!(compile("var a; var b; a * (b = a * b);").is_ok());
+        assert!(compile("var a; var b; a = b = 3;").is_ok());
+    }
+
+    #[test]
+    fn multiplication_cannot_be_an_assignment_target() {
+        let error = compile("var a; var b; a * b = 3;").expect_err("invalid target should fail");
+        assert!(error.contains("Invalid assignment target."));
     }
 }
