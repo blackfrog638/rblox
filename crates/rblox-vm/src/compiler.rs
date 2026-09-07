@@ -1,7 +1,7 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR,
-    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, OP_POP, Value, allocate_string,
+    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP,
+    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -505,7 +505,10 @@ mod tests {
     #[test]
     fn compile_reads_and_assigns_global_variable() {
         let chunk = compile("var a = 1; a = 2; print a;").expect("variables should compile");
-        assert_eq!(chunk.code, vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, 16]);
+        assert_eq!(
+            chunk.code,
+            vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, 16]
+        );
     }
 
     #[test]
