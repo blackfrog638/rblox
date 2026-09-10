@@ -85,13 +85,13 @@ fn run_source(vm: &mut rblox_vm::VM, source: &str) -> Result<(), u8> {
 mod tests {
     #[test]
     fn compile_accepts_number_literal() {
-        let chunk = rblox_vm::compile("3.14").expect("number literal should compile");
-        assert_eq!(chunk.code.len(), 3);
+        let chunk = rblox_vm::compile("3.14;").expect("number literal should compile");
+        assert_eq!(chunk.code.len(), 4);
     }
 
     #[test]
     fn compile_accepts_arithmetic_expression() {
-        let chunk = rblox_vm::compile("1 + 2").expect("arithmetic expression should compile");
-        assert_eq!(chunk.code.len(), 6);
+        let chunk = rblox_vm::compile("1 + 2;").expect("arithmetic expression should compile");
+        assert_eq!(chunk.code.len(), 7);
     }
 }

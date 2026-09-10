@@ -1,7 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP,
-    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Value, allocate_string,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT,
+    OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, Value,
+    allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -45,6 +46,11 @@ struct ParseRule {
     prefix: Option<PrefixRule>,
     infix: Option<InfixRule>,
     precedence: Precedence,
+}
+
+struct Local<'a> {
+    name: Token<'a>,
+    depth: usize,
 }
 
 enum PrefixRule {
@@ -173,6 +179,8 @@ struct Parser<'a> {
     current: usize,
     chunk: Chunk,
     panic_mode: bool,
+    scope_depth: usize,
+    locals: Vec<Local<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -182,6 +190,8 @@ impl<'a> Parser<'a> {
             current: 0,
             chunk: Chunk::new(),
             panic_mode: false,
+            scope_depth: 0,
+            locals: Vec::new(),
         }
     }
 
@@ -203,7 +213,15 @@ impl<'a> Parser<'a> {
     }
 
     fn var_declaration(&mut self) -> Result<(), String> {
-        let global = self.parse_variable("Expect variable name.")?;
+        let name = self.consume_identifier("Expect variable name.")?;
+        let global = (self.scope_depth == 0).then(|| {
+            self.chunk
+                .add_constant(allocate_string(name.lexeme.to_string()))
+        });
+
+        if self.scope_depth > 0 {
+            self.declare_local(name)?;
+        }
 
         if self.match_token(TokenKind::Equal) {
             self.expression()?;
@@ -216,18 +234,67 @@ impl<'a> Parser<'a> {
             "Expect ';' after variable declaration.",
         )?;
 
-        self.define_variable(global);
+        if let Some(global) = global {
+            self.define_variable(global);
+        } else {
+            self.mark_initialized();
+        }
         Ok(())
     }
 
-    fn parse_variable(&mut self, message: &str) -> Result<u8, String> {
+    fn consume_identifier(&mut self, message: &str) -> Result<Token<'a>, String> {
         if self.peek().kind != TokenKind::Identifier {
             return Err(format!("Compile error: {}", message));
         }
 
-        let name = self.advance();
-        let name_value = allocate_string(name.lexeme.to_string());
-        Ok(self.chunk.add_constant(name_value))
+        Ok(self.advance())
+    }
+
+    fn declare_local(&mut self, name: Token<'a>) -> Result<(), String> {
+        for local in self.locals.iter().rev() {
+            if local.depth < self.scope_depth {
+                break;
+            }
+            if local.name.lexeme == name.lexeme {
+                return Err(
+                    "Compile error: Already a variable with this name in this scope.".to_string(),
+                );
+            }
+        }
+
+        self.locals.push(Local {
+            name,
+            depth: usize::MAX,
+        });
+        Ok(())
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        let local = self.locals.last_mut().expect("local must be declared");
+        local.depth = self.scope_depth;
+    }
+
+    fn resolve_local(&self, name: &str) -> Result<Option<u8>, String> {
+        for (index, local) in self.locals.iter().enumerate().rev() {
+            if local.name.lexeme == name {
+                if local.depth == usize::MAX {
+                    return Err(
+                        "Compile error: Can't read local variable in its own initializer."
+                            .to_string(),
+                    );
+                }
+                let slot = u8::try_from(index).map_err(|_| {
+                    "Compile error: Too many local variables in function.".to_string()
+                })?;
+                return Ok(Some(slot));
+            }
+        }
+
+        Ok(None)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -262,6 +329,11 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> Result<(), String> {
         if self.match_token(TokenKind::Print) {
             self.print_statement()
+        } else if self.match_token(TokenKind::LeftBrace) {
+            self.begin_scope();
+            let result = self.block();
+            self.end_scope();
+            result
         } else {
             self.expression_statement()
         }
@@ -272,6 +344,30 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::Semicolon, "Expected ';' after value.")?;
         self.emit(OP_PRINT);
         Ok(())
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn block(&mut self) -> Result<(), String> {
+        while !matches!(self.peek().kind, TokenKind::RightBrace | TokenKind::Eof) {
+            self.declaration()?;
+        }
+
+        self.consume(TokenKind::RightBrace, "Expected '}' after block.")
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+        while self
+            .locals
+            .last()
+            .is_some_and(|local| local.depth > self.scope_depth)
+        {
+            self.emit(OP_POP);
+            self.locals.pop();
+        }
     }
 
     fn expression_statement(&mut self) -> Result<(), String> {
@@ -321,15 +417,30 @@ impl<'a> Parser<'a> {
 
     fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
-        let global = self.chunk.add_constant(allocate_string(name));
+        let local = self.resolve_local(&name)?;
+        let global = local
+            .is_none()
+            .then(|| self.chunk.add_constant(allocate_string(name.clone())));
 
         if can_assign && self.match_token(TokenKind::Equal) {
             self.expression()?;
-            self.emit(OP_SET_GLOBAL);
-            self.chunk.write(global, 1);
+            if let Some(slot) = local {
+                self.emit(OP_SET_LOCAL);
+                self.chunk.write(slot, 1);
+            } else {
+                self.emit(OP_SET_GLOBAL);
+                self.chunk
+                    .write(global.expect("global constant must exist"), 1);
+            }
         } else {
-            self.emit(OP_GET_GLOBAL);
-            self.chunk.write(global, 1);
+            if let Some(slot) = local {
+                self.emit(OP_GET_LOCAL);
+                self.chunk.write(slot, 1);
+            } else {
+                self.emit(OP_GET_GLOBAL);
+                self.chunk
+                    .write(global.expect("global constant must exist"), 1);
+            }
         }
 
         Ok(())
@@ -521,5 +632,73 @@ mod tests {
     fn multiplication_cannot_be_an_assignment_target() {
         let error = compile("var a; var b; a * b = 3;").expect_err("invalid target should fail");
         assert!(error.contains("Invalid assignment target."));
+    }
+
+    #[test]
+    fn compile_uses_local_slots_inside_blocks() {
+        let chunk = compile("{ var a = 1; print a; }").expect("local variable should compile");
+
+        assert_eq!(
+            chunk.code,
+            vec![OP_CONSTANT, 0, OP_GET_LOCAL, 0, OP_PRINT, OP_POP, OP_RETURN]
+        );
+    }
+
+    #[test]
+    fn compile_resolves_outer_block_locals_and_shadowing() {
+        let chunk = compile("{ var a = 1; { print a; var a = 2; print a; } print a; }")
+            .expect("nested local variables should compile");
+
+        assert_eq!(
+            chunk.code,
+            vec![
+                OP_CONSTANT,
+                0,
+                OP_GET_LOCAL,
+                0,
+                OP_PRINT,
+                OP_CONSTANT,
+                1,
+                OP_GET_LOCAL,
+                1,
+                OP_PRINT,
+                OP_POP,
+                OP_GET_LOCAL,
+                0,
+                OP_PRINT,
+                OP_POP,
+                OP_RETURN,
+            ]
+        );
+    }
+
+    #[test]
+    fn compile_assigns_local_slots() {
+        let chunk =
+            compile("{ var a = 1; a = 2; print a; }").expect("local assignment should compile");
+
+        assert_eq!(
+            chunk.code,
+            vec![
+                OP_CONSTANT,
+                0,
+                OP_CONSTANT,
+                1,
+                OP_SET_LOCAL,
+                0,
+                OP_POP,
+                OP_GET_LOCAL,
+                0,
+                OP_PRINT,
+                OP_POP,
+                OP_RETURN,
+            ]
+        );
+    }
+
+    #[test]
+    fn local_variable_cannot_be_read_in_its_initializer() {
+        let error = compile("{ var a = a; }").expect_err("self initializer should fail");
+        assert!(error.contains("own initializer"));
     }
 }

@@ -1,8 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP,
-    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string,
-    disassemble_instruction,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT,
+    OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
+    Object, Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::table::Table;
@@ -86,6 +86,27 @@ impl VM {
                         return Err(self.runtime_error("Undefined variable."));
                     }
                     self.globals.set(name, value);
+                }
+                OP_GET_LOCAL => {
+                    let slot = self.read_byte()? as usize;
+                    let value = self
+                        .stack
+                        .get(slot)
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Invalid local variable slot."))?;
+                    self.push(value);
+                }
+                OP_SET_LOCAL => {
+                    let slot = self.read_byte()? as usize;
+                    let value = self
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    if slot >= self.stack.len() {
+                        return Err(self.runtime_error("Invalid local variable slot."));
+                    }
+                    self.stack[slot] = value;
                 }
                 OP_EQUAL => {
                     let right = self.pop()?;

@@ -21,6 +21,8 @@ pub const OP_POP: u8 = 17;
 pub const OP_DEFINE_GLOBAL: u8 = 18;
 pub const OP_GET_GLOBAL: u8 = 19;
 pub const OP_SET_GLOBAL: u8 = 20;
+pub const OP_GET_LOCAL: u8 = 21;
+pub const OP_SET_LOCAL: u8 = 22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
@@ -274,6 +276,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
         OP_DEFINE_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_DEFINE_GLOBAL"),
         OP_GET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_GET_GLOBAL"),
         OP_SET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_SET_GLOBAL"),
+        OP_GET_LOCAL => byte_instruction(chunk, offset, &prefix, "OP_GET_LOCAL"),
+        OP_SET_LOCAL => byte_instruction(chunk, offset, &prefix, "OP_SET_LOCAL"),
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)
@@ -317,6 +321,14 @@ fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) 
         format!("{}{} {:4} {}", prefix, name, index, value_text),
         offset + 2,
     )
+}
+
+fn byte_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (String, usize) {
+    let Some(slot) = chunk.code.get(offset + 1).copied() else {
+        return (format!("{}{} <missing slot>", prefix, name), offset + 1);
+    };
+
+    (format!("{}{} {:4}", prefix, name, slot), offset + 2)
 }
 
 #[cfg(test)]
