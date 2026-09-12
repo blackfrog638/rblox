@@ -1,8 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT,
-    OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
-    Object, Value, allocate_string, disassemble_instruction,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_MULTIPLY,
+    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
+    OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::table::Table;
@@ -186,6 +186,21 @@ impl VM {
                 OP_POP => {
                     self.pop()?;
                 }
+                OP_JUMP => {
+                    let offset = self.read_short()? as usize;
+                    self.ip += offset;
+                }
+                OP_JUMP_IF_FALSE => {
+                    let offset = self.read_short()? as usize;
+                    let value = self
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    if !self.is_truthy(value) {
+                        self.ip += offset;
+                    }
+                }
                 _ => {
                     return Err(format!(
                         "Unknown opcode {} at offset {}",
@@ -204,6 +219,12 @@ impl VM {
             })?;
         self.ip += 1;
         Ok(byte)
+    }
+
+    fn read_short(&mut self) -> Result<u16, String> {
+        let high = self.read_byte()?;
+        let low = self.read_byte()?;
+        Ok(u16::from_be_bytes([high, low]))
     }
 
     fn read_constant(&mut self) -> Result<Value, String> {
@@ -397,6 +418,24 @@ mod tests {
         vm.set_trace_execution(true);
 
         let result = vm.interpret_chunk(chunk);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn interpret_runs_then_branch_for_truthy_if() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret("if (true) { print 42; }");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn interpret_runs_else_branch_for_falsy_if() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret("if (false) { print 1; } else { print 2; }");
+
         assert!(result.is_ok());
     }
 

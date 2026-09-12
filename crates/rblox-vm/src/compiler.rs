@@ -1,8 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_LESS, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT,
-    OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, Value,
-    allocate_string,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_MULTIPLY,
+    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
+    OP_SUBTRACT, OP_TRUE, Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -327,16 +327,46 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<(), String> {
-        if self.match_token(TokenKind::Print) {
-            self.print_statement()
-        } else if self.match_token(TokenKind::LeftBrace) {
-            self.begin_scope();
-            let result = self.block();
-            self.end_scope();
-            result
-        } else {
-            self.expression_statement()
+        match self.peek().kind {
+            TokenKind::Print => {
+                self.advance();
+                self.print_statement()
+            }
+            TokenKind::LeftBrace => {
+                self.advance();
+                self.begin_scope();
+                let result = self.block();
+                self.end_scope();
+                result
+            }
+            TokenKind::If => {
+                self.advance();
+                self.if_statement()
+            }
+            _ => self.expression_statement(),
         }
+    }
+
+    fn if_statement(&mut self) -> Result<(), String> {
+        self.consume(TokenKind::LeftParen, "Expected '(' after 'if'.")?;
+        self.expression()?;
+        self.consume(TokenKind::RightParen, "Expected ')' after condition.")?;
+
+        let then_jump = self.emit_jump(OP_JUMP_IF_FALSE);
+        self.emit(OP_POP);
+        self.statement()?;
+
+        let else_jump = self.emit_jump(OP_JUMP);
+
+        self.patch_jump(then_jump);
+        self.emit(OP_POP);
+
+        if self.match_token(TokenKind::Else) {
+            self.statement()?;
+        }
+
+        self.patch_jump(else_jump);
+        Ok(())
     }
 
     fn print_statement(&mut self) -> Result<(), String> {
@@ -522,18 +552,31 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn emit(&mut self, instruction: u8) {
+        self.chunk.write(instruction, 1);
+    }
+
     fn emit_constant(&mut self, value: Value) {
         let index = self.chunk.add_constant(value);
         self.chunk.write(OP_CONSTANT, 1);
         self.chunk.write(index, 1);
     }
 
-    fn emit_return(&mut self) {
-        self.chunk.write(OP_RETURN, 1);
+    fn emit_jump(&mut self, instruction: u8) -> usize {
+        self.emit(instruction);
+        self.emit(0xff);
+        self.emit(0xff);
+        self.chunk.code.len() - 2
     }
 
-    fn emit(&mut self, instruction: u8) {
-        self.chunk.write(instruction, 1);
+    fn patch_jump(&mut self, jump: usize) {
+        let offset = self.chunk.code.len() - jump - 2;
+        self.chunk.code[jump] = (offset >> 8) as u8;
+        self.chunk.code[jump + 1] = (offset & 0xff) as u8;
+    }
+
+    fn emit_return(&mut self) {
+        self.chunk.write(OP_RETURN, 1);
     }
 
     fn peek(&self) -> &Token<'a> {

@@ -23,6 +23,8 @@ pub const OP_GET_GLOBAL: u8 = 19;
 pub const OP_SET_GLOBAL: u8 = 20;
 pub const OP_GET_LOCAL: u8 = 21;
 pub const OP_SET_LOCAL: u8 = 22;
+pub const OP_JUMP: u8 = 23;
+pub const OP_JUMP_IF_FALSE: u8 = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
@@ -282,6 +284,19 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
             (line, offset + 1)
         }
+        OP_POP => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_POP"));
+            (line, offset + 1)
+        }
+        OP_JUMP => {
+            let (line, next_offset) = jump_instruction(chunk, offset, &prefix, "OP_JUMP");
+            (line, next_offset)
+        }
+        OP_JUMP_IF_FALSE => {
+            let (line, next_offset) =
+                jump_instruction(chunk, offset, &prefix, "OP_JUMP_IF_FALSE");
+            (line, next_offset)
+        }
         _ => {
             let line = format!("{}Unknown opcode {}", prefix, instruction);
             (line, offset + 1)
@@ -329,6 +344,14 @@ fn byte_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (
     };
 
     (format!("{}{} {:4}", prefix, name, slot), offset + 2)
+}
+
+fn jump_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (String, usize) {
+    let Some(offset_value) = chunk.code.get(offset + 1).copied() else {
+        return (format!("{}{} <missing offset>", prefix, name), offset + 1);
+    };
+
+    (format!("{}{} {:4}", prefix, name, offset_value), offset + 2)
 }
 
 #[cfg(test)]
