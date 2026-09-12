@@ -347,6 +347,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.while_statement()
             }
+            TokenKind::For => {
+                self.advance();
+                self.for_statement()
+            }
             _ => self.expression_statement(),
         }
     }
@@ -387,6 +391,55 @@ impl<'a> Parser<'a> {
 
         self.patch_jump(exit_jump);
         self.emit(OP_POP);
+        Ok(())
+    }
+
+    fn for_statement(&mut self) -> Result<(), String> {
+        self.begin_scope();
+
+        self.consume(TokenKind::LeftParen, "Expected '(' after 'for'.")?;
+
+        if !self.match_token(TokenKind::Semicolon) {
+            if self.match_token(TokenKind::Var) {
+                self.var_declaration()?;
+            } else {
+                self.expression()?;
+                self.consume(TokenKind::Semicolon, "Expected ';' after initializer.")?;
+            }
+        }
+
+        let mut loop_start = self.chunk.code.len();
+        let mut exit_jump = None;
+
+        if !self.match_token(TokenKind::Semicolon) {
+            self.expression()?;
+            self.consume(TokenKind::Semicolon, "Expected ';' after loop condition.")?;
+            exit_jump = Some(self.emit_jump(OP_JUMP_IF_FALSE));
+            self.emit(OP_POP);
+        }
+
+        if !self.match_token(TokenKind::RightParen) {
+            let body_jump = self.emit_jump(OP_JUMP);
+            let increment_start = self.chunk.code.len();
+            self.expression()?;
+            self.emit(OP_POP);
+            self.consume(TokenKind::RightParen, "Expected ')' after for clauses.")?;
+            self.emit_loop(loop_start);
+            self.patch_jump(body_jump);
+            loop_start = increment_start;
+        } else {
+            self.consume(TokenKind::RightParen, "Expected ')' after for clauses.")?;
+        }
+
+        self.statement()?;
+        self.emit_loop(loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit(OP_POP);
+        }
+
+        self.end_scope();
         Ok(())
     }
 
@@ -704,6 +757,15 @@ mod tests {
 
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
         assert!(chunk.code.contains(&OP_JUMP));
+    }
+
+    #[test]
+    fn compile_generates_loop_for_for_statement() {
+        let chunk = compile("for (var i = 0; i < 3; i = i + 1) { print i; }")
+            .expect("for loop should compile");
+
+        assert!(chunk.code.contains(&OP_LOOP));
+        assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
     }
 
     #[test]

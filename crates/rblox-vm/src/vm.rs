@@ -461,6 +461,22 @@ mod tests {
     }
 
     #[test]
+    fn interpret_executes_for_loop_until_condition_is_false() {
+        let mut vm = VM::new();
+
+        let result =
+            vm.interpret("var total = 0; for (var i = 0; i < 3; i = i + 1) { total = total + 1; }");
+
+        assert!(result.is_ok());
+
+        let total = match allocate_string("total".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&total), Some(&Value::Number(3.0)));
+    }
+
+    #[test]
     fn interpret_evaluates_and_and_or_short_circuit() {
         let mut vm = VM::new();
 
