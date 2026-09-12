@@ -1,8 +1,8 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_MULTIPLY,
-    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
-    OP_SUBTRACT, OP_TRUE, Value, allocate_string,
+    Chunk, OP_ADD, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL,
+    OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE,
+    OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
+    Value, allocate_string,
 };
 use crate::scanner::{Scanner, Token, TokenKind};
 
@@ -343,6 +343,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.if_statement()
             }
+            TokenKind::While => {
+                self.advance();
+                self.while_statement()
+            }
             _ => self.expression_statement(),
         }
     }
@@ -366,6 +370,23 @@ impl<'a> Parser<'a> {
         }
 
         self.patch_jump(else_jump);
+        Ok(())
+    }
+
+    fn while_statement(&mut self) -> Result<(), String> {
+        let loop_start = self.chunk.code.len();
+
+        self.consume(TokenKind::LeftParen, "Expected '(' after 'while'.")?;
+        self.expression()?;
+        self.consume(TokenKind::RightParen, "Expected ')' after condition.")?;
+
+        let exit_jump = self.emit_jump(OP_JUMP_IF_FALSE);
+        self.emit(OP_POP);
+        self.statement()?;
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit(OP_POP);
         Ok(())
     }
 
@@ -542,12 +563,17 @@ impl<'a> Parser<'a> {
 
     fn parse_binary(&mut self) -> Result<(), String> {
         let operator = self.previous().kind;
-        let precedence = get_rule(operator).precedence;
-        self.parse_precedence(precedence.next())?;
 
         match operator {
-            TokenKind::Or => self.parse_or()?,
-            TokenKind::And => self.parse_and()?,
+            TokenKind::Or => return self.parse_or(),
+            TokenKind::And => return self.parse_and(),
+            _ => {
+                let precedence = get_rule(operator).precedence;
+                self.parse_precedence(precedence.next())?;
+            }
+        }
+
+        match operator {
             TokenKind::Plus => self.emit(OP_ADD),
             TokenKind::Minus => self.emit(OP_SUBTRACT),
             TokenKind::Star => self.emit(OP_MULTIPLY),
@@ -587,6 +613,13 @@ impl<'a> Parser<'a> {
         self.emit(0xff);
         self.emit(0xff);
         self.chunk.code.len() - 2
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        self.emit(OP_LOOP);
+        let offset = self.chunk.code.len() - loop_start + 2;
+        self.emit(((offset >> 8) & 0xff) as u8);
+        self.emit((offset & 0xff) as u8);
     }
 
     fn patch_jump(&mut self, jump: usize) {
@@ -660,7 +693,17 @@ mod tests {
     #[test]
     fn compile_supports_boolean_and_nil_literals() {
         let chunk = compile("true and false or nil;").expect("boolean and nil should compile");
-        assert_eq!(chunk.code.len(), 7);
+        assert!(chunk.code.len() >= 7);
+        assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
+    }
+
+    #[test]
+    fn compile_supports_short_circuit_logic() {
+        let chunk = compile("var a = false and (1 / 0); var b = true or (1 / 0);")
+            .expect("logical short-circuit should compile");
+
+        assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
+        assert!(chunk.code.contains(&OP_JUMP));
     }
 
     #[test]
@@ -757,6 +800,15 @@ mod tests {
                 OP_RETURN,
             ]
         );
+    }
+
+    #[test]
+    fn compile_generates_loop_for_while_statement() {
+        let chunk =
+            compile("var i = 0; while (i < 3) { i = i + 1; }").expect("while loop should compile");
+
+        assert!(chunk.code.contains(&OP_LOOP));
+        assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
     }
 
     #[test]

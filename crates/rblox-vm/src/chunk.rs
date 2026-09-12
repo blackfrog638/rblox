@@ -25,6 +25,7 @@ pub const OP_GET_LOCAL: u8 = 21;
 pub const OP_SET_LOCAL: u8 = 22;
 pub const OP_JUMP: u8 = 23;
 pub const OP_JUMP_IF_FALSE: u8 = 24;
+pub const OP_LOOP: u8 = 25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
@@ -293,8 +294,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             (line, next_offset)
         }
         OP_JUMP_IF_FALSE => {
-            let (line, next_offset) =
-                jump_instruction(chunk, offset, &prefix, "OP_JUMP_IF_FALSE");
+            let (line, next_offset) = jump_instruction(chunk, offset, &prefix, "OP_JUMP_IF_FALSE");
             (line, next_offset)
         }
         _ => {

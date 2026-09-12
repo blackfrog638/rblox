@@ -1,8 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_MULTIPLY,
-    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
-    OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::table::Table;
@@ -200,6 +200,13 @@ impl VM {
                     if !self.is_truthy(value) {
                         self.ip += offset;
                     }
+                }
+                OP_LOOP => {
+                    let offset = self.read_short()? as usize;
+                    if offset > self.ip {
+                        return Err(self.runtime_error("Invalid loop offset."));
+                    }
+                    self.ip -= offset;
                 }
                 _ => {
                     return Err(format!(
@@ -437,6 +444,58 @@ mod tests {
         let result = vm.interpret("if (false) { print 1; } else { print 2; }");
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn interpret_executes_while_loop_until_condition_is_false() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret("var i = 0; while (i < 3) { i = i + 1; }");
+
+        assert!(result.is_ok());
+        let name = match allocate_string("i".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&name), Some(&Value::Number(3.0)));
+    }
+
+    #[test]
+    fn interpret_evaluates_and_and_or_short_circuit() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret(
+            "var a = false and (1 / 0); var b = true or (1 / 0); var c = true and false; var d = false or true;",
+        );
+
+        assert!(result.is_ok());
+
+        let a = allocate_string("a".to_string());
+        let b = allocate_string("b".to_string());
+        let c = allocate_string("c".to_string());
+        let d = allocate_string("d".to_string());
+
+        let a_value = match a {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let b_value = match b {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let c_value = match c {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let d_value = match d {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+
+        assert_eq!(vm.globals.get(&a_value), Some(&Value::Bool(false)));
+        assert_eq!(vm.globals.get(&b_value), Some(&Value::Bool(true)));
+        assert_eq!(vm.globals.get(&c_value), Some(&Value::Bool(false)));
+        assert_eq!(vm.globals.get(&d_value), Some(&Value::Bool(true)));
     }
 
     #[test]
