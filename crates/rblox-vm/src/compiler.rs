@@ -520,6 +520,26 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn parse_and(&mut self) -> Result<(), String> {
+        let end_jump = self.emit_jump(OP_JUMP_IF_FALSE);
+        self.emit(OP_POP);
+        self.parse_precedence(Precedence::And)?;
+        self.patch_jump(end_jump);
+        Ok(())
+    }
+
+    fn parse_or(&mut self) -> Result<(), String> {
+        let else_jump = self.emit_jump(OP_JUMP_IF_FALSE);
+        let end_jump = self.emit_jump(OP_JUMP);
+
+        self.patch_jump(else_jump);
+        self.emit(OP_POP);
+        self.parse_precedence(Precedence::Or)?;
+
+        self.patch_jump(end_jump);
+        Ok(())
+    }
+
     fn parse_binary(&mut self) -> Result<(), String> {
         let operator = self.previous().kind;
         let precedence = get_rule(operator).precedence;
