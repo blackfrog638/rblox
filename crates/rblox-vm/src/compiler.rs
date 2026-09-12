@@ -546,8 +546,8 @@ impl<'a> Parser<'a> {
         self.parse_precedence(precedence.next())?;
 
         match operator {
-            TokenKind::Or => self.emit(OP_OR),
-            TokenKind::And => self.emit(OP_AND),
+            TokenKind::Or => self.parse_or()?,
+            TokenKind::And => self.parse_and()?,
             TokenKind::Plus => self.emit(OP_ADD),
             TokenKind::Minus => self.emit(OP_SUBTRACT),
             TokenKind::Star => self.emit(OP_MULTIPLY),
