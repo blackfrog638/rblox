@@ -461,6 +461,57 @@ mod tests {
     }
 
     #[test]
+    fn interpret_executes_continue_in_while_loop() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret(
+            "var total = 0; var i = 0; while (i < 3) { i = i + 1; continue; total = total + 10; }",
+        );
+
+        assert!(result.is_ok());
+        let total = match allocate_string("total".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let i = match allocate_string("i".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&total), Some(&Value::Number(0.0)));
+        assert_eq!(vm.globals.get(&i), Some(&Value::Number(3.0)));
+    }
+
+    #[test]
+    fn interpret_executes_break_in_while_loop() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret(
+            "var total = 0; var i = 0; while (i < 3) { i = i + 1; if (i == 2) break; total = total + 1; }",
+        );
+
+        assert!(result.is_ok());
+        let total = match allocate_string("total".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let i = match allocate_string("i".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&total), Some(&Value::Number(1.0)));
+        assert_eq!(vm.globals.get(&i), Some(&Value::Number(2.0)));
+    }
+
+    #[test]
+    fn interpret_break_cleans_up_block_locals() {
+        let mut vm = VM::new();
+
+        let result = vm.interpret("while (true) { var local = 1; break; } print 2;");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn interpret_executes_for_loop_until_condition_is_false() {
         let mut vm = VM::new();
 

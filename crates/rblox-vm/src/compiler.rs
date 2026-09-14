@@ -53,6 +53,12 @@ struct Local<'a> {
     depth: usize,
 }
 
+struct LoopContext {
+    continue_target: usize,
+    scope_depth: usize,
+    break_jumps: Vec<usize>,
+}
+
 enum PrefixRule {
     Grouping,
     Unary,
@@ -181,6 +187,7 @@ struct Parser<'a> {
     panic_mode: bool,
     scope_depth: usize,
     locals: Vec<Local<'a>>,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl<'a> Parser<'a> {
@@ -192,6 +199,7 @@ impl<'a> Parser<'a> {
             panic_mode: false,
             scope_depth: 0,
             locals: Vec::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -339,6 +347,14 @@ impl<'a> Parser<'a> {
                 self.end_scope();
                 result
             }
+            TokenKind::Continue => {
+                self.advance();
+                self.continue_statement()
+            }
+            TokenKind::Break => {
+                self.advance();
+                self.break_statement()
+            }
             TokenKind::If => {
                 self.advance();
                 self.if_statement()
@@ -379,6 +395,11 @@ impl<'a> Parser<'a> {
 
     fn while_statement(&mut self) -> Result<(), String> {
         let loop_start = self.chunk.code.len();
+        self.loop_stack.push(LoopContext {
+            continue_target: loop_start,
+            scope_depth: self.scope_depth,
+            break_jumps: Vec::new(),
+        });
 
         self.consume(TokenKind::LeftParen, "Expected '(' after 'while'.")?;
         self.expression()?;
@@ -391,6 +412,49 @@ impl<'a> Parser<'a> {
 
         self.patch_jump(exit_jump);
         self.emit(OP_POP);
+        let break_jumps = self
+            .loop_stack
+            .pop()
+            .expect("loop context must exist")
+            .break_jumps;
+        for break_jump in break_jumps {
+            self.patch_jump(break_jump);
+        }
+        Ok(())
+    }
+
+    fn continue_statement(&mut self) -> Result<(), String> {
+        let Some((scope_depth, continue_target)) = self
+            .loop_stack
+            .last()
+            .map(|loop_context| (loop_context.scope_depth, loop_context.continue_target))
+        else {
+            return Err("Compile error: 'continue' outside of a loop.".to_string());
+        };
+
+        self.consume(TokenKind::Semicolon, "Expected ';' after 'continue'.")?;
+        self.emit_loop_cleanup(scope_depth);
+        self.emit_loop(continue_target);
+        Ok(())
+    }
+
+    fn break_statement(&mut self) -> Result<(), String> {
+        let Some(loop_scope_depth) = self
+            .loop_stack
+            .last()
+            .map(|loop_context| loop_context.scope_depth)
+        else {
+            return Err("Compile error: 'break' outside of a loop.".to_string());
+        };
+
+        self.consume(TokenKind::Semicolon, "Expected ';' after 'break'.")?;
+        self.emit_loop_cleanup(loop_scope_depth);
+        let jump = self.emit_jump(OP_JUMP);
+        self.loop_stack
+            .last_mut()
+            .expect("break targets must exist")
+            .break_jumps
+            .push(jump);
         Ok(())
     }
 
@@ -410,6 +474,11 @@ impl<'a> Parser<'a> {
 
         let mut loop_start = self.chunk.code.len();
         let mut exit_jump = None;
+        self.loop_stack.push(LoopContext {
+            continue_target: loop_start,
+            scope_depth: self.scope_depth,
+            break_jumps: Vec::new(),
+        });
 
         if !self.match_token(TokenKind::Semicolon) {
             self.expression()?;
@@ -427,6 +496,10 @@ impl<'a> Parser<'a> {
             self.emit_loop(loop_start);
             self.patch_jump(body_jump);
             loop_start = increment_start;
+            self.loop_stack
+                .last_mut()
+                .expect("loop context must exist")
+                .continue_target = loop_start;
         } else {
             self.consume(TokenKind::RightParen, "Expected ')' after for clauses.")?;
         }
@@ -439,6 +512,14 @@ impl<'a> Parser<'a> {
             self.emit(OP_POP);
         }
 
+        let break_jumps = self
+            .loop_stack
+            .pop()
+            .expect("loop context must exist")
+            .break_jumps;
+        for break_jump in break_jumps {
+            self.patch_jump(break_jump);
+        }
         self.end_scope();
         Ok(())
     }
@@ -471,6 +552,18 @@ impl<'a> Parser<'a> {
         {
             self.emit(OP_POP);
             self.locals.pop();
+        }
+    }
+
+    fn emit_loop_cleanup(&mut self, target_scope_depth: usize) {
+        let cleanup_count = self
+            .locals
+            .iter()
+            .rev()
+            .take_while(|local| local.depth > target_scope_depth)
+            .count();
+        for _ in 0..cleanup_count {
+            self.emit(OP_POP);
         }
     }
 
@@ -748,6 +841,24 @@ mod tests {
         let chunk = compile("true and false or nil;").expect("boolean and nil should compile");
         assert!(chunk.code.len() >= 7);
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
+    }
+
+    #[test]
+    fn compile_supports_continue_statement() {
+        let chunk = compile("while (true) { continue; }").expect("continue should compile");
+        assert!(chunk.code.contains(&OP_LOOP));
+    }
+
+    #[test]
+    fn compile_supports_break_statement() {
+        let chunk = compile("while (true) { break; }").expect("break should compile");
+        assert!(chunk.code.contains(&OP_JUMP));
+    }
+
+    #[test]
+    fn compile_rejects_break_outside_loop() {
+        let result = compile("break;");
+        assert!(result.is_err());
     }
 
     #[test]

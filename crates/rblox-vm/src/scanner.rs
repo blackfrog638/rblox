@@ -32,7 +32,9 @@ impl KeywordTrie {
 static KEYWORDS: LazyLock<KeywordTrie> = LazyLock::new(|| {
     let mut trie = KeywordTrie::new();
     trie.insert("and", TokenKind::And);
+    trie.insert("break", TokenKind::Break);
     trie.insert("class", TokenKind::Class);
+    trie.insert("continue", TokenKind::Continue);
     trie.insert("else", TokenKind::Else);
     trie.insert("false", TokenKind::False);
     trie.insert("for", TokenKind::For);
@@ -86,7 +88,9 @@ pub enum TokenKind {
     Number,
     // Keywords.
     And,
+    Break,
     Class,
+    Continue,
     Else,
     False,
     For,
@@ -402,7 +406,7 @@ mod tests {
     #[test]
     fn scans_identifiers_and_keywords() {
         let kinds = scan_all(
-            "andy and class false for fun if nil or print return super this true var while _x x2",
+            "andy and break class continue false for fun if nil or print return super this true var while _x x2",
         );
 
         assert_eq!(
@@ -410,7 +414,9 @@ mod tests {
             vec![
                 TokenKind::Identifier,
                 TokenKind::And,
+                TokenKind::Break,
                 TokenKind::Class,
+                TokenKind::Continue,
                 TokenKind::False,
                 TokenKind::For,
                 TokenKind::Fun,
