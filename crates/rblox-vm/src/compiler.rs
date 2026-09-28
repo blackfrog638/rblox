@@ -202,7 +202,7 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(tokens: &'a [Token<'a>], function_type: FunctionType) -> Self {
-        Self {
+        let mut parser = Self {
             tokens,
             current: 0,
             function: ObjFunction::new(),
@@ -211,7 +211,16 @@ impl<'a> Parser<'a> {
             scope_depth: 0,
             locals: Vec::new(),
             loop_stack: Vec::new(),
-        }
+        };
+        parser.locals.push(Local {
+            name: Token {
+                kind: TokenKind::Identifier,
+                lexeme: "",
+                line: 0,
+            },
+            depth: 0,
+        });
+        parser
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
@@ -968,7 +977,7 @@ mod tests {
 
         assert_eq!(
             chunk.code,
-            vec![OP_CONSTANT, 0, OP_GET_LOCAL, 0, OP_PRINT, OP_POP, OP_RETURN]
+            vec![OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_PRINT, OP_POP, OP_RETURN]
         );
     }
 
@@ -984,16 +993,16 @@ mod tests {
                 OP_CONSTANT,
                 0,
                 OP_GET_LOCAL,
-                0,
+                1,
                 OP_PRINT,
                 OP_CONSTANT,
                 1,
                 OP_GET_LOCAL,
-                1,
+                2,
                 OP_PRINT,
                 OP_POP,
                 OP_GET_LOCAL,
-                0,
+                1,
                 OP_PRINT,
                 OP_POP,
                 OP_RETURN,
@@ -1015,10 +1024,10 @@ mod tests {
                 OP_CONSTANT,
                 1,
                 OP_SET_LOCAL,
-                0,
+                1,
                 OP_POP,
                 OP_GET_LOCAL,
-                0,
+                1,
                 OP_PRINT,
                 OP_POP,
                 OP_RETURN,

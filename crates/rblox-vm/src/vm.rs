@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
     OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
@@ -9,9 +11,25 @@ use crate::object::{ObjFunction, Object, allocate_string};
 use crate::table::Table;
 use crate::value::Value;
 
-pub struct VM {
-    function: ObjFunction,
+const FRAMES_MAX: usize = 64;
+
+struct CallFrame {
+    function: Rc<Object>,
     ip: usize,
+    stack_start: usize,
+}
+
+impl CallFrame {
+    fn function(&self) -> Result<&ObjFunction, String> {
+        match self.function.as_ref() {
+            Object::Function(function) => Ok(function),
+            Object::String { .. } => Err("Call frame does not contain a function.".to_string()),
+        }
+    }
+}
+
+pub struct VM {
+    call_stack: Vec<CallFrame>,
     stack: Vec<Value>,
     globals: Table,
     trace_execution: bool,
@@ -20,8 +38,7 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         Self {
-            function: ObjFunction::new(),
-            ip: 0,
+            call_stack: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::new(),
             globals: Table::new(),
             trace_execution: false,
@@ -33,27 +50,35 @@ impl VM {
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), String> {
-        self.function = compile(source)?;
-        self.ip = 0;
-        self.reset_stack();
-
-        self.run()
+        let function = compile(source)?;
+        self.interpret_function(function)
     }
 
     pub fn interpret_chunk(&mut self, chunk: Chunk) -> Result<(), String> {
-        self.function = ObjFunction {
+        let function = ObjFunction {
             chunk,
             ..ObjFunction::new()
         };
-        self.ip = 0;
+        self.interpret_function(function)
+    }
+
+    fn interpret_function(&mut self, function: ObjFunction) -> Result<(), String> {
         self.reset_stack();
 
-        self.run()
+        let function = Rc::new(Object::Function(function));
+        self.push(Value::Obj(Rc::clone(&function)));
+        self.push_call_frame(function, 0)?;
+
+        let result = self.run();
+        if result.is_err() {
+            self.reset_stack();
+        }
+        result
     }
 
     pub fn run(&mut self) -> Result<(), String> {
         loop {
-            if self.trace_execution && self.ip < self.current_chunk().code.len() {
+            if self.trace_execution && self.current_ip()? < self.current_chunk()?.code.len() {
                 self.trace_current_state();
             }
 
@@ -94,6 +119,7 @@ impl VM {
                 }
                 OP_GET_LOCAL => {
                     let slot = self.read_byte()? as usize;
+                    let slot = self.current_frame()?.stack_start + slot;
                     let value = self
                         .stack
                         .get(slot)
@@ -103,6 +129,7 @@ impl VM {
                 }
                 OP_SET_LOCAL => {
                     let slot = self.read_byte()? as usize;
+                    let slot = self.current_frame()?.stack_start + slot;
                     let value = self
                         .stack
                         .last()
@@ -184,8 +211,8 @@ impl VM {
                     println!("{}", value);
                 }
                 OP_RETURN => {
-                    let value = self.pop().unwrap_or(Value::Nil);
-                    println!("{}", value);
+                    self.call_stack.pop();
+                    self.stack.clear();
                     return Ok(());
                 }
                 OP_POP => {
@@ -193,7 +220,7 @@ impl VM {
                 }
                 OP_JUMP => {
                     let offset = self.read_short()? as usize;
-                    self.ip += offset;
+                    self.current_frame_mut()?.ip += offset;
                 }
                 OP_JUMP_IF_FALSE => {
                     let offset = self.read_short()? as usize;
@@ -203,21 +230,21 @@ impl VM {
                         .cloned()
                         .ok_or_else(|| self.runtime_error("Stack underflow."))?;
                     if !self.is_truthy(value) {
-                        self.ip += offset;
+                        self.current_frame_mut()?.ip += offset;
                     }
                 }
                 OP_LOOP => {
                     let offset = self.read_short()? as usize;
-                    if offset > self.ip {
+                    if offset > self.current_ip()? {
                         return Err(self.runtime_error("Invalid loop offset."));
                     }
-                    self.ip -= offset;
+                    self.current_frame_mut()?.ip -= offset;
                 }
                 _ => {
                     return Err(format!(
                         "Unknown opcode {} at offset {}",
                         instruction,
-                        self.ip.saturating_sub(1)
+                        self.current_ip()?.saturating_sub(1)
                     ));
                 }
             }
@@ -225,13 +252,14 @@ impl VM {
     }
 
     fn read_byte(&mut self) -> Result<u8, String> {
+        let ip = self.current_ip()?;
         let byte = self
-            .current_chunk()
+            .current_chunk()?
             .code
-            .get(self.ip)
+            .get(ip)
             .copied()
-            .ok_or_else(|| format!("Instruction pointer out of bounds at offset {}", self.ip))?;
-        self.ip += 1;
+            .ok_or_else(|| format!("Instruction pointer out of bounds at offset {}", ip))?;
+        self.current_frame_mut()?.ip += 1;
         Ok(byte)
     }
 
@@ -243,7 +271,7 @@ impl VM {
 
     fn read_constant(&mut self) -> Result<Value, String> {
         let constant_index = self.read_byte()?;
-        self.current_chunk()
+        self.current_chunk()?
             .constants
             .get(constant_index as usize)
             .cloned()
@@ -251,7 +279,7 @@ impl VM {
                 format!(
                     "Invalid constant index {} at offset {}",
                     constant_index,
-                    self.ip.saturating_sub(1)
+                    self.current_ip().unwrap_or(0).saturating_sub(1)
                 )
             })
     }
@@ -269,10 +297,39 @@ impl VM {
 
     fn reset_stack(&mut self) {
         self.stack.clear();
+        self.call_stack.clear();
     }
 
-    fn current_chunk(&self) -> &Chunk {
-        &self.function.chunk
+    fn current_frame(&self) -> Result<&CallFrame, String> {
+        self.call_stack
+            .last()
+            .ok_or_else(|| "No active call frame.".to_string())
+    }
+
+    fn current_frame_mut(&mut self) -> Result<&mut CallFrame, String> {
+        self.call_stack
+            .last_mut()
+            .ok_or_else(|| "No active call frame.".to_string())
+    }
+
+    fn current_ip(&self) -> Result<usize, String> {
+        Ok(self.current_frame()?.ip)
+    }
+
+    fn current_chunk(&self) -> Result<&Chunk, String> {
+        Ok(&self.current_frame()?.function()?.chunk)
+    }
+
+    fn push_call_frame(&mut self, function: Rc<Object>, stack_start: usize) -> Result<(), String> {
+        if self.call_stack.len() >= FRAMES_MAX {
+            return Err(self.runtime_error("Stack overflow."));
+        }
+        self.call_stack.push(CallFrame {
+            function,
+            ip: 0,
+            stack_start,
+        });
+        Ok(())
     }
 
     fn push(&mut self, value: Value) {
@@ -317,8 +374,9 @@ impl VM {
 
     fn runtime_error(&self, message: &str) -> String {
         let line = self
-            .current_chunk()
-            .line_at(self.ip.saturating_sub(1))
+            .current_ip()
+            .ok()
+            .and_then(|ip| self.current_chunk().ok()?.line_at(ip.saturating_sub(1)))
             .unwrap_or(0);
         format!("{}\n[line {}] in script", message, line)
     }
@@ -340,8 +398,10 @@ impl VM {
             .join("");
         println!("          {}", stack_dump);
 
-        let (line, _) = disassemble_instruction(self.current_chunk(), self.ip);
-        println!("{}", line);
+        if let (Ok(chunk), Ok(ip)) = (self.current_chunk(), self.current_ip()) {
+            let (line, _) = disassemble_instruction(chunk, ip);
+            println!("{}", line);
+        }
     }
 }
 
@@ -372,6 +432,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(vm.stack.is_empty());
+        assert!(vm.call_stack.is_empty());
     }
 
     #[test]
@@ -393,6 +454,7 @@ mod tests {
                 .expect_err("expected runtime error")
                 .contains("Operand must be a number.")
         );
+        assert!(vm.call_stack.is_empty());
     }
 
     #[test]
@@ -440,6 +502,38 @@ mod tests {
 
         let result = vm.interpret_chunk(chunk);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn local_slots_are_relative_to_the_current_call_frame() {
+        let mut chunk = Chunk::new();
+        let name = chunk.add_constant(allocate_string("captured".to_string()));
+        chunk.write(OP_GET_LOCAL, 1);
+        chunk.write(1, 1);
+        chunk.write(OP_DEFINE_GLOBAL, 1);
+        chunk.write(name, 1);
+        chunk.write(OP_RETURN, 1);
+
+        let function = Rc::new(Object::Function(ObjFunction {
+            chunk,
+            ..ObjFunction::new()
+        }));
+        let mut vm = VM::new();
+        let function_value = Value::Obj(Rc::clone(&function));
+        vm.call_stack.push(CallFrame {
+            function,
+            ip: 0,
+            stack_start: 1,
+        });
+        vm.stack = vec![Value::Bool(false), function_value, Value::Number(42.0)];
+
+        vm.run().expect("frame bytecode should run");
+
+        let name = match allocate_string("captured".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        assert_eq!(vm.globals.get(&name), Some(&Value::Number(42.0)));
     }
 
     #[test]
