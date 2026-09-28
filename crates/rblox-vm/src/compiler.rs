@@ -3,11 +3,11 @@ use crate::chunk::{
     OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE,
     OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
 };
-use crate::object::allocate_string;
+use crate::object::{ObjFunction, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str) -> Result<Chunk, String> {
+pub fn compile(source: &str) -> Result<ObjFunction, String> {
     let mut scanner = Scanner::new(source);
     let mut tokens = Vec::new();
 
@@ -24,7 +24,7 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
         return Err(format!("Compile error: {}", token.lexeme));
     }
 
-    let mut parser = Parser::new(&tokens);
+    let mut parser = Parser::new(&tokens, FunctionType::Script);
 
     let mut first_error = None;
     while !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -40,7 +40,7 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
     }
 
     parser.emit_return();
-    Ok(parser.chunk)
+    Ok(parser.function)
 }
 
 struct ParseRule {
@@ -58,6 +58,14 @@ struct LoopContext {
     continue_target: usize,
     scope_depth: usize,
     break_jumps: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FunctionType {
+    // Function declarations will construct this variant in the next stage.
+    #[allow(dead_code)]
+    Function,
+    Script,
 }
 
 enum PrefixRule {
@@ -184,7 +192,8 @@ fn get_rule(kind: TokenKind) -> ParseRule {
 struct Parser<'a> {
     tokens: &'a [Token<'a>],
     current: usize,
-    chunk: Chunk,
+    function: ObjFunction,
+    function_type: FunctionType,
     panic_mode: bool,
     scope_depth: usize,
     locals: Vec<Local<'a>>,
@@ -192,16 +201,21 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Token<'a>]) -> Self {
+    fn new(tokens: &'a [Token<'a>], function_type: FunctionType) -> Self {
         Self {
             tokens,
             current: 0,
-            chunk: Chunk::new(),
+            function: ObjFunction::new(),
+            function_type,
             panic_mode: false,
             scope_depth: 0,
             locals: Vec::new(),
             loop_stack: Vec::new(),
         }
+    }
+
+    fn current_chunk(&mut self) -> &mut Chunk {
+        &mut self.function.chunk
     }
 
     fn declaration(&mut self) -> Result<(), String> {
@@ -224,7 +238,7 @@ impl<'a> Parser<'a> {
     fn var_declaration(&mut self) -> Result<(), String> {
         let name = self.consume_identifier("Expect variable name.")?;
         let global = (self.scope_depth == 0).then(|| {
-            self.chunk
+            self.current_chunk()
                 .add_constant(allocate_string(name.lexeme.to_string()))
         });
 
@@ -307,8 +321,8 @@ impl<'a> Parser<'a> {
     }
 
     fn define_variable(&mut self, global: u8) {
-        self.chunk.write(OP_DEFINE_GLOBAL, 1);
-        self.chunk.write(global, 1);
+        self.current_chunk().write(OP_DEFINE_GLOBAL, 1);
+        self.current_chunk().write(global, 1);
     }
 
     fn synchronize(&mut self) {
@@ -395,7 +409,7 @@ impl<'a> Parser<'a> {
     }
 
     fn while_statement(&mut self) -> Result<(), String> {
-        let loop_start = self.chunk.code.len();
+        let loop_start = self.current_chunk().code.len();
         self.loop_stack.push(LoopContext {
             continue_target: loop_start,
             scope_depth: self.scope_depth,
@@ -473,7 +487,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let mut loop_start = self.chunk.code.len();
+        let mut loop_start = self.current_chunk().code.len();
         let mut exit_jump = None;
         self.loop_stack.push(LoopContext {
             continue_target: loop_start,
@@ -490,7 +504,7 @@ impl<'a> Parser<'a> {
 
         if !self.match_token(TokenKind::RightParen) {
             let body_jump = self.emit_jump(OP_JUMP);
-            let increment_start = self.chunk.code.len();
+            let increment_start = self.current_chunk().code.len();
             self.expression()?;
             self.emit(OP_POP);
             self.consume(TokenKind::RightParen, "Expected ')' after for clauses.")?;
@@ -616,27 +630,28 @@ impl<'a> Parser<'a> {
     fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
         let local = self.resolve_local(&name)?;
-        let global = local
-            .is_none()
-            .then(|| self.chunk.add_constant(allocate_string(name.clone())));
+        let global = local.is_none().then(|| {
+            self.current_chunk()
+                .add_constant(allocate_string(name.clone()))
+        });
 
         if can_assign && self.match_token(TokenKind::Equal) {
             self.expression()?;
             if let Some(slot) = local {
                 self.emit(OP_SET_LOCAL);
-                self.chunk.write(slot, 1);
+                self.current_chunk().write(slot, 1);
             } else {
                 self.emit(OP_SET_GLOBAL);
-                self.chunk
+                self.current_chunk()
                     .write(global.expect("global constant must exist"), 1);
             }
         } else {
             if let Some(slot) = local {
                 self.emit(OP_GET_LOCAL);
-                self.chunk.write(slot, 1);
+                self.current_chunk().write(slot, 1);
             } else {
                 self.emit(OP_GET_GLOBAL);
-                self.chunk
+                self.current_chunk()
                     .write(global.expect("global constant must exist"), 1);
             }
         }
@@ -746,37 +761,39 @@ impl<'a> Parser<'a> {
     }
 
     fn emit(&mut self, instruction: u8) {
-        self.chunk.write(instruction, 1);
+        self.current_chunk().write(instruction, 1);
     }
 
     fn emit_constant(&mut self, value: Value) {
-        let index = self.chunk.add_constant(value);
-        self.chunk.write(OP_CONSTANT, 1);
-        self.chunk.write(index, 1);
+        let index = self.current_chunk().add_constant(value);
+        self.current_chunk().write(OP_CONSTANT, 1);
+        self.current_chunk().write(index, 1);
     }
 
     fn emit_jump(&mut self, instruction: u8) -> usize {
         self.emit(instruction);
         self.emit(0xff);
         self.emit(0xff);
-        self.chunk.code.len() - 2
+        self.current_chunk().code.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit(OP_LOOP);
-        let offset = self.chunk.code.len() - loop_start + 2;
+        let offset = self.current_chunk().code.len() - loop_start + 2;
         self.emit(((offset >> 8) & 0xff) as u8);
         self.emit((offset & 0xff) as u8);
     }
 
     fn patch_jump(&mut self, jump: usize) {
-        let offset = self.chunk.code.len() - jump - 2;
-        self.chunk.code[jump] = (offset >> 8) as u8;
-        self.chunk.code[jump + 1] = (offset & 0xff) as u8;
+        let offset = self.current_chunk().code.len() - jump - 2;
+        self.current_chunk().code[jump] = (offset >> 8) as u8;
+        self.current_chunk().code[jump + 1] = (offset & 0xff) as u8;
     }
 
     fn emit_return(&mut self) {
-        self.chunk.write(OP_RETURN, 1);
+        match self.function_type {
+            FunctionType::Function | FunctionType::Script => self.emit(OP_RETURN),
+        }
     }
 
     fn peek(&self) -> &Token<'a> {
@@ -820,39 +837,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compile_returns_top_level_script_function() {
+        let function = compile("nil;").expect("script should compile");
+
+        assert_eq!(function.arity, 0);
+        assert_eq!(function.name, None);
+        assert_eq!(function.chunk.code.last(), Some(&OP_RETURN));
+    }
+
+    #[test]
     fn compile_accepts_number_literal() {
-        let chunk = compile("3.14;").expect("number literal should compile");
+        let chunk = compile("3.14;")
+            .expect("number literal should compile")
+            .chunk;
         assert_eq!(chunk.code.len(), 4);
     }
 
     #[test]
     fn compile_handles_simple_binary_expression() {
-        let chunk = compile("1 + 2;").expect("simple expression should compile");
+        let chunk = compile("1 + 2;")
+            .expect("simple expression should compile")
+            .chunk;
         assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 17, 16]);
     }
 
     #[test]
     fn compile_respects_operator_precedence() {
-        let chunk = compile("1 + 2 * 3;").expect("precedence should compile");
+        let chunk = compile("1 + 2 * 3;")
+            .expect("precedence should compile")
+            .chunk;
         assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 17, 16]);
     }
 
     #[test]
     fn compile_supports_boolean_and_nil_literals() {
-        let chunk = compile("true and false or nil;").expect("boolean and nil should compile");
+        let chunk = compile("true and false or nil;")
+            .expect("boolean and nil should compile")
+            .chunk;
         assert!(chunk.code.len() >= 7);
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
     }
 
     #[test]
     fn compile_supports_continue_statement() {
-        let chunk = compile("while (true) { continue; }").expect("continue should compile");
+        let chunk = compile("while (true) { continue; }")
+            .expect("continue should compile")
+            .chunk;
         assert!(chunk.code.contains(&OP_LOOP));
     }
 
     #[test]
     fn compile_supports_break_statement() {
-        let chunk = compile("while (true) { break; }").expect("break should compile");
+        let chunk = compile("while (true) { break; }")
+            .expect("break should compile")
+            .chunk;
         assert!(chunk.code.contains(&OP_JUMP));
     }
 
@@ -865,7 +903,8 @@ mod tests {
     #[test]
     fn compile_supports_short_circuit_logic() {
         let chunk = compile("var a = false and (1 / 0); var b = true or (1 / 0);")
-            .expect("logical short-circuit should compile");
+            .expect("logical short-circuit should compile")
+            .chunk;
 
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
         assert!(chunk.code.contains(&OP_JUMP));
@@ -874,7 +913,8 @@ mod tests {
     #[test]
     fn compile_generates_loop_for_for_statement() {
         let chunk = compile("for (var i = 0; i < 3; i = i + 1) { print i; }")
-            .expect("for loop should compile");
+            .expect("for loop should compile")
+            .chunk;
 
         assert!(chunk.code.contains(&OP_LOOP));
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
@@ -882,20 +922,26 @@ mod tests {
 
     #[test]
     fn compile_supports_equality_and_comparison() {
-        let chunk = compile("1 < 2 == true;").expect("comparison should compile");
+        let chunk = compile("1 < 2 == true;")
+            .expect("comparison should compile")
+            .chunk;
         assert_eq!(chunk.code.len(), 9);
     }
 
     #[test]
     fn compile_defines_global_variable() {
-        let chunk = compile("var breakfast = \"beignets\";").expect("variable should compile");
+        let chunk = compile("var breakfast = \"beignets\";")
+            .expect("variable should compile")
+            .chunk;
         assert_eq!(chunk.code, vec![0, 1, 18, 0, 16]);
         assert_eq!(chunk.constants.len(), 2);
     }
 
     #[test]
     fn compile_reads_and_assigns_global_variable() {
-        let chunk = compile("var a = 1; a = 2; print a;").expect("variables should compile");
+        let chunk = compile("var a = 1; a = 2; print a;")
+            .expect("variables should compile")
+            .chunk;
         assert_eq!(
             chunk.code,
             vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, 16]
@@ -916,7 +962,9 @@ mod tests {
 
     #[test]
     fn compile_uses_local_slots_inside_blocks() {
-        let chunk = compile("{ var a = 1; print a; }").expect("local variable should compile");
+        let chunk = compile("{ var a = 1; print a; }")
+            .expect("local variable should compile")
+            .chunk;
 
         assert_eq!(
             chunk.code,
@@ -927,7 +975,8 @@ mod tests {
     #[test]
     fn compile_resolves_outer_block_locals_and_shadowing() {
         let chunk = compile("{ var a = 1; { print a; var a = 2; print a; } print a; }")
-            .expect("nested local variables should compile");
+            .expect("nested local variables should compile")
+            .chunk;
 
         assert_eq!(
             chunk.code,
@@ -954,8 +1003,9 @@ mod tests {
 
     #[test]
     fn compile_assigns_local_slots() {
-        let chunk =
-            compile("{ var a = 1; a = 2; print a; }").expect("local assignment should compile");
+        let chunk = compile("{ var a = 1; a = 2; print a; }")
+            .expect("local assignment should compile")
+            .chunk;
 
         assert_eq!(
             chunk.code,
@@ -978,8 +1028,9 @@ mod tests {
 
     #[test]
     fn compile_generates_loop_for_while_statement() {
-        let chunk =
-            compile("var i = 0; while (i < 3) { i = i + 1; }").expect("while loop should compile");
+        let chunk = compile("var i = 0; while (i < 3) { i = i + 1; }")
+            .expect("while loop should compile")
+            .chunk;
 
         assert!(chunk.code.contains(&OP_LOOP));
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));

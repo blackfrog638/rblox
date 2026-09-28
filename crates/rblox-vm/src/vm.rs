@@ -5,12 +5,12 @@ use crate::chunk::{
     OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
-use crate::object::{Object, allocate_string};
+use crate::object::{ObjFunction, Object, allocate_string};
 use crate::table::Table;
 use crate::value::Value;
 
 pub struct VM {
-    chunk: Chunk,
+    function: ObjFunction,
     ip: usize,
     stack: Vec<Value>,
     globals: Table,
@@ -20,7 +20,7 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         Self {
-            chunk: Chunk::new(),
+            function: ObjFunction::new(),
             ip: 0,
             stack: Vec::new(),
             globals: Table::new(),
@@ -33,7 +33,7 @@ impl VM {
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), String> {
-        self.chunk = compile(source)?;
+        self.function = compile(source)?;
         self.ip = 0;
         self.reset_stack();
 
@@ -41,7 +41,10 @@ impl VM {
     }
 
     pub fn interpret_chunk(&mut self, chunk: Chunk) -> Result<(), String> {
-        self.chunk = chunk;
+        self.function = ObjFunction {
+            chunk,
+            ..ObjFunction::new()
+        };
         self.ip = 0;
         self.reset_stack();
 
@@ -50,7 +53,7 @@ impl VM {
 
     pub fn run(&mut self) -> Result<(), String> {
         loop {
-            if self.trace_execution && self.ip < self.chunk.code.len() {
+            if self.trace_execution && self.ip < self.current_chunk().code.len() {
                 self.trace_current_state();
             }
 
@@ -222,10 +225,12 @@ impl VM {
     }
 
     fn read_byte(&mut self) -> Result<u8, String> {
-        let byte =
-            self.chunk.code.get(self.ip).copied().ok_or_else(|| {
-                format!("Instruction pointer out of bounds at offset {}", self.ip)
-            })?;
+        let byte = self
+            .current_chunk()
+            .code
+            .get(self.ip)
+            .copied()
+            .ok_or_else(|| format!("Instruction pointer out of bounds at offset {}", self.ip))?;
         self.ip += 1;
         Ok(byte)
     }
@@ -238,7 +243,7 @@ impl VM {
 
     fn read_constant(&mut self) -> Result<Value, String> {
         let constant_index = self.read_byte()?;
-        self.chunk
+        self.current_chunk()
             .constants
             .get(constant_index as usize)
             .cloned()
@@ -264,6 +269,10 @@ impl VM {
 
     fn reset_stack(&mut self) {
         self.stack.clear();
+    }
+
+    fn current_chunk(&self) -> &Chunk {
+        &self.function.chunk
     }
 
     fn push(&mut self, value: Value) {
@@ -307,7 +316,10 @@ impl VM {
     }
 
     fn runtime_error(&self, message: &str) -> String {
-        let line = self.chunk.line_at(self.ip.saturating_sub(1)).unwrap_or(0);
+        let line = self
+            .current_chunk()
+            .line_at(self.ip.saturating_sub(1))
+            .unwrap_or(0);
         format!("{}\n[line {}] in script", message, line)
     }
 
@@ -328,7 +340,7 @@ impl VM {
             .join("");
         println!("          {}", stack_dump);
 
-        let (line, _) = disassemble_instruction(&self.chunk, self.ip);
+        let (line, _) = disassemble_instruction(self.current_chunk(), self.ip);
         println!("{}", line);
     }
 }
