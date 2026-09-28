@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc};
+use crate::value::Value;
 
 pub const OP_CONSTANT: u8 = 0;
 pub const OP_NIL: u8 = 1;
@@ -26,113 +26,6 @@ pub const OP_SET_LOCAL: u8 = 22;
 pub const OP_JUMP: u8 = 23;
 pub const OP_JUMP_IF_FALSE: u8 = 24;
 pub const OP_LOOP: u8 = 25;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ObjType {
-    String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Value {
-    Number(f64),
-    Bool(bool),
-    Nil,
-    Obj(Rc<Object>),
-}
-
-impl Value {
-    pub fn is_obj_type(&self, obj_type: ObjType) -> bool {
-        match self {
-            Value::Obj(obj) => obj.obj_type() == obj_type,
-            _ => false,
-        }
-    }
-
-    pub fn as_obj(&self) -> Option<&Object> {
-        match self {
-            Value::Obj(obj) => Some(obj.as_ref()),
-            _ => None,
-        }
-    }
-
-    pub fn as_string(&self) -> Option<&String> {
-        match self {
-            Value::Obj(obj) => match obj.as_ref() {
-                Object::String { value, .. } => Some(value),
-            },
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Object {
-    String { value: String, hash: u32 },
-}
-
-impl Object {
-    pub fn obj_type(&self) -> ObjType {
-        match self {
-            Object::String { .. } => ObjType::String,
-        }
-    }
-
-    pub fn string_hash(&self) -> u32 {
-        match self {
-            Object::String { hash, .. } => *hash,
-        }
-    }
-
-    pub fn string_value(&self) -> Option<&str> {
-        match self {
-            Object::String { value, .. } => Some(value),
-        }
-    }
-}
-
-impl std::fmt::Display for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Object::String { value, .. } => write!(f, "{}", value),
-        }
-    }
-}
-
-pub fn is_obj_type(value: &Value, obj_type: ObjType) -> bool {
-    value.is_obj_type(obj_type)
-}
-
-pub fn as_string(value: &Value) -> Option<&String> {
-    value.as_string()
-}
-
-pub fn as_str(value: &Value) -> Option<&str> {
-    value.as_string().map(String::as_str)
-}
-
-pub fn allocate_string(value: String) -> Value {
-    Value::Obj(Rc::new(Object::String {
-        hash: hash_string(&value),
-        value,
-    }))
-}
-
-pub fn hash_string(value: &str) -> u32 {
-    value.bytes().fold(2166136261, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(16777619)
-    })
-}
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Number(value) => write!(f, "{}", value),
-            Value::Bool(value) => write!(f, "{}", value),
-            Value::Nil => write!(f, "nil"),
-            Value::Obj(value) => write!(f, "{}", value),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {

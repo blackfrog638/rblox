@@ -2,10 +2,12 @@ use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
     OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
     OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, Object, Value, allocate_string, disassemble_instruction,
+    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
+use crate::object::{Object, allocate_string};
 use crate::table::Table;
+use crate::value::Value;
 
 pub struct VM {
     chunk: Chunk,

@@ -2,9 +2,10 @@ use crate::chunk::{
     Chunk, OP_ADD, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL,
     OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE,
     OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
-    Value, allocate_string,
 };
+use crate::object::allocate_string;
 use crate::scanner::{Scanner, Token, TokenKind};
+use crate::value::Value;
 
 pub fn compile(source: &str) -> Result<Chunk, String> {
     let mut scanner = Scanner::new(source);

@@ -1,4 +1,4 @@
-use crate::chunk::{Object, Value};
+use crate::{object::Object, value::Value};
 use std::rc::Rc;
 
 const INITIAL_CAPACITY: usize = 8;
@@ -60,7 +60,7 @@ impl Table {
                 None => return None,
                 Some(key)
                     if entry.value.is_some()
-                        && key.string_hash() == hash
+                        && key.string_hash() == Some(hash)
                         && key.string_value() == Some(value) =>
                 {
                     return Some(key.clone());
@@ -71,7 +71,12 @@ impl Table {
         }
     }
 
+    /// Inserts a value under a string key.
+    ///
+    /// # Panics
+    /// Panics if the key is not a string object.
     pub fn set(&mut self, key: Rc<Object>, value: Value) -> bool {
+        assert!(key.string_value().is_some(), "Table keys must be strings.");
         if (self.count + 1) * 100 > self.capacity().max(1) * MAX_LOAD {
             self.adjust_capacity(self.capacity().max(INITIAL_CAPACITY) * 2);
         }
@@ -112,7 +117,7 @@ impl Table {
             return None;
         }
 
-        let mut index = (key.string_hash() as usize) % self.entries.len();
+        let mut index = (key.string_hash()? as usize) % self.entries.len();
         loop {
             let entry = &self.entries[index];
             match &entry.key {
@@ -126,7 +131,8 @@ impl Table {
     }
 
     fn find_insert_index(&self, key: &Rc<Object>) -> usize {
-        let mut index = (key.string_hash() as usize) % self.entries.len();
+        let mut index =
+            (key.string_hash().expect("Table keys must be strings.") as usize) % self.entries.len();
         let mut tombstone = None;
 
         loop {
@@ -177,7 +183,7 @@ impl Default for Table {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::allocate_string;
+    use crate::object::allocate_string;
 
     fn key(value: &str) -> Rc<Object> {
         match allocate_string(value.to_string()) {
@@ -202,7 +208,7 @@ mod tests {
     fn find_string_matches_content_and_hash() {
         let mut table = Table::new();
         let stored = key("interned");
-        let hash = stored.string_hash();
+        let hash = stored.string_hash().unwrap();
         table.set(stored.clone(), Value::Nil);
 
         assert_eq!(table.find_string("interned", hash), Some(stored));
