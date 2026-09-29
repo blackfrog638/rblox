@@ -1,7 +1,8 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL,
-    OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE,
-    OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
+    Chunk, OP_ADD, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
 };
 use std::rc::Rc;
 
@@ -79,6 +80,7 @@ enum PrefixRule {
 
 enum InfixRule {
     Binary,
+    Call,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
@@ -92,6 +94,7 @@ enum Precedence {
     Term,
     Factor,
     Unary,
+    Call,
     Primary,
 }
 
@@ -106,7 +109,8 @@ impl Precedence {
             Self::Comparison => Self::Term,
             Self::Term => Self::Factor,
             Self::Factor => Self::Unary,
-            Self::Unary => Self::Primary,
+            Self::Unary => Self::Call,
+            Self::Call => Self::Primary,
             Self::Primary => Self::Primary,
         }
     }
@@ -116,8 +120,8 @@ fn get_rule(kind: TokenKind) -> ParseRule {
     match kind {
         TokenKind::LeftParen => ParseRule {
             prefix: Some(PrefixRule::Grouping),
-            infix: None,
-            precedence: Precedence::None,
+            infix: Some(InfixRule::Call),
+            precedence: Precedence::Call,
         },
         TokenKind::Minus => ParseRule {
             prefix: Some(PrefixRule::Unary),
@@ -685,6 +689,7 @@ impl<'a> Parser<'a> {
             let rule = get_rule(infix.kind);
             match rule.infix.expect("infix rule must have a parser") {
                 InfixRule::Binary => self.parse_binary()?,
+                InfixRule::Call => self.parse_call()?,
             }
         }
 
@@ -827,6 +832,31 @@ impl<'a> Parser<'a> {
             _ => unreachable!(),
         }
         Ok(())
+    }
+
+    fn parse_call(&mut self) -> Result<(), String> {
+        let arg_count = self.argument_list()?;
+        self.emit(OP_CALL);
+        self.emit(arg_count as u8);
+        Ok(())
+    }
+
+    fn argument_list(&mut self) -> Result<usize, String> {
+        let mut arg_count = 0;
+        if !self.match_token(TokenKind::RightParen) {
+            loop {
+                self.expression()?;
+                arg_count += 1;
+                if arg_count > 255 {
+                    return Err("Compile error: Can't have more than 255 arguments.".to_string());
+                }
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.consume(TokenKind::RightParen, "Expected ')' after arguments.")?;
+        }
+        Ok(arg_count)
     }
 
     fn emit(&mut self, instruction: u8) {

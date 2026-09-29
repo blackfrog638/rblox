@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
+    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
     OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
     OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
     OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
@@ -211,9 +211,19 @@ impl VM {
                     println!("{}", value);
                 }
                 OP_RETURN => {
-                    self.call_stack.pop();
-                    self.stack.clear();
-                    return Ok(());
+                    let frame = self
+                        .call_stack
+                        .pop()
+                        .ok_or_else(|| self.runtime_error("No active call frame."))?;
+                    self.stack.truncate(frame.stack_start);
+
+                    if self.call_stack.is_empty() {
+                        return Ok(());
+                    }
+
+                    // User-defined functions currently return nil implicitly.
+                    // Keep that value as the result of the call expression.
+                    self.push(Value::Nil);
                 }
                 OP_POP => {
                     self.pop()?;
@@ -239,6 +249,19 @@ impl VM {
                         return Err(self.runtime_error("Invalid loop offset."));
                     }
                     self.current_frame_mut()?.ip -= offset;
+                }
+                OP_CALL => {
+                    let arg_count = self.read_byte()? as usize;
+                    let callee_index = self
+                        .stack
+                        .len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    let callee = self.stack[callee_index].clone();
+                    let Value::Obj(function) = callee else {
+                        return Err(self.runtime_error("Can only call functions."));
+                    };
+                    self.call_function(function, arg_count)?;
                 }
                 _ => {
                     return Err(format!(
@@ -340,6 +363,29 @@ impl VM {
         self.stack
             .pop()
             .ok_or_else(|| self.runtime_error("Stack underflow."))
+    }
+
+    fn call_function(&mut self, function: Rc<Object>, arg_count: usize) -> Result<(), String> {
+        let arity = match function.as_ref() {
+            Object::Function(ObjFunction { arity, .. }) => *arity,
+            Object::String { .. } => {
+                return Err(self.runtime_error("Can only call functions."));
+            }
+        };
+
+        if arg_count != arity {
+            return Err(self.runtime_error(&format!(
+                "Expected {} arguments but got {}.",
+                arity, arg_count
+            )));
+        }
+
+        let stack_start = self
+            .stack
+            .len()
+            .checked_sub(arg_count + 1)
+            .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+        self.push_call_frame(function, stack_start)
     }
 
     fn binary_number_op<F>(&mut self, error_message: &str, operation: F) -> Result<(), String>

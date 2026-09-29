@@ -26,6 +26,7 @@ pub const OP_SET_LOCAL: u8 = 22;
 pub const OP_JUMP: u8 = 23;
 pub const OP_JUMP_IF_FALSE: u8 = 24;
 pub const OP_LOOP: u8 = 25;
+pub const OP_CALL: u8 = 26;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -190,6 +191,11 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             let (line, next_offset) = jump_instruction(chunk, offset, &prefix, "OP_JUMP_IF_FALSE");
             (line, next_offset)
         }
+        OP_LOOP => {
+            let (line, next_offset) = jump_instruction(chunk, offset, &prefix, "OP_LOOP");
+            (line, next_offset)
+        }
+        OP_CALL => byte_instruction(chunk, offset, &prefix, "OP_CALL"),
         _ => {
             let line = format!("{}Unknown opcode {}", prefix, instruction);
             (line, offset + 1)
