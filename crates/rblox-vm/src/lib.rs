@@ -15,5 +15,5 @@ pub use scanner::{Scanner, Token, TokenKind};
 pub use table::{Entry, Table};
 pub use vm::VM;
 
-pub use object::{ObjFunction, ObjType, Object, allocate_string, hash_string};
+pub use object::{NativeFn, ObjFunction, ObjType, Object, allocate_string, hash_string};
 pub use value::Value;

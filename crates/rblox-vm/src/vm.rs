@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Instant};
 
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
@@ -7,7 +7,7 @@ use crate::chunk::{
     OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
-use crate::object::{ObjFunction, Object, allocate_string};
+use crate::object::{NativeFn, ObjFunction, Object, allocate_string};
 use crate::table::Table;
 use crate::value::Value;
 
@@ -24,6 +24,7 @@ impl CallFrame {
         match self.function.as_ref() {
             Object::Function(function) => Ok(function),
             Object::String { .. } => Err("Call frame does not contain a function.".to_string()),
+            Object::NativeFunction(_) => Err("Call frame does not contain a function.".to_string()),
         }
     }
 }
@@ -33,16 +34,20 @@ pub struct VM {
     stack: Vec<Value>,
     globals: Table,
     trace_execution: bool,
+    start_time: Instant,
 }
 
 impl VM {
     pub fn new() -> Self {
-        Self {
+        let mut vm = Self {
             call_stack: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::new(),
             globals: Table::new(),
             trace_execution: false,
-        }
+            start_time: Instant::now(),
+        };
+        vm.define_native_function("clock", Self::clock_native);
+        vm
     }
 
     pub fn set_trace_execution(&mut self, enabled: bool) {
@@ -256,10 +261,18 @@ impl VM {
                         .checked_sub(arg_count + 1)
                         .ok_or_else(|| self.runtime_error("Stack underflow."))?;
                     let callee = self.stack[callee_index].clone();
-                    let Value::Obj(function) = callee else {
+                    let Value::Obj(callee) = callee else {
                         return Err(self.runtime_error("Can only call functions."));
                     };
-                    self.call_function(function, arg_count)?;
+                    match callee.as_ref() {
+                        Object::Function(_) => self.call_function(callee, arg_count)?,
+                        Object::NativeFunction(function) => {
+                            self.call_native(*function, callee_index, arg_count)?;
+                        }
+                        Object::String { .. } => {
+                            return Err(self.runtime_error("Can only call functions."));
+                        }
+                    }
                 }
                 _ => {
                     return Err(format!(
@@ -363,10 +376,42 @@ impl VM {
             .ok_or_else(|| self.runtime_error("Stack underflow."))
     }
 
+    fn clock_native(vm: &mut Self, args: &[Value]) -> Result<Value, String> {
+        if !args.is_empty() {
+            return Err(format!("Expected 0 arguments but got {}.", args.len()));
+        }
+
+        Ok(Value::Number(vm.start_time.elapsed().as_secs_f64()))
+    }
+
+    fn call_native(
+        &mut self,
+        function: NativeFn,
+        callee_index: usize,
+        arg_count: usize,
+    ) -> Result<(), String> {
+        let args = self
+            .stack
+            .get(callee_index + 1..)
+            .ok_or_else(|| self.runtime_error("Stack underflow."))?
+            .to_vec();
+        if args.len() != arg_count {
+            return Err(self.runtime_error("Stack underflow."));
+        }
+
+        let result = function(self, &args).map_err(|error| self.runtime_error(&error))?;
+        self.stack.truncate(callee_index);
+        self.push(result);
+        Ok(())
+    }
+
     fn call_function(&mut self, function: Rc<Object>, arg_count: usize) -> Result<(), String> {
         let arity = match function.as_ref() {
             Object::Function(ObjFunction { arity, .. }) => *arity,
             Object::String { .. } => {
+                return Err(self.runtime_error("Can only call functions."));
+            }
+            Object::NativeFunction(_) => {
                 return Err(self.runtime_error("Can only call functions."));
             }
         };
@@ -446,6 +491,14 @@ impl VM {
             let (line, _) = disassemble_instruction(chunk, ip);
             println!("{}", line);
         }
+    }
+
+    fn define_native_function(&mut self, name: &str, function: NativeFn) {
+        let Value::Obj(name) = allocate_string(name.to_string()) else {
+            unreachable!("allocate_string always returns an object")
+        };
+        let function = Rc::new(Object::NativeFunction(function));
+        self.globals.set(name, Value::Obj(function));
     }
 }
 

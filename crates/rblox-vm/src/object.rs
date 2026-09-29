@@ -2,16 +2,20 @@ use std::rc::Rc;
 
 use crate::{chunk::Chunk, value::Value};
 
+pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
     String,
     Function,
+    NativeFunction,
 }
 
 #[derive(Clone, Debug)]
 pub enum Object {
     String { value: String, hash: u32 },
     Function(ObjFunction),
+    NativeFunction(NativeFn),
 }
 
 impl Object {
@@ -19,6 +23,7 @@ impl Object {
         match self {
             Object::String { .. } => ObjType::String,
             Object::Function(_) => ObjType::Function,
+            Object::NativeFunction(_) => ObjType::NativeFunction,
         }
     }
 
@@ -26,6 +31,7 @@ impl Object {
         match self {
             Object::String { hash, .. } => Some(*hash),
             Object::Function(_) => None,
+            Object::NativeFunction(_) => None,
         }
     }
 
@@ -33,6 +39,7 @@ impl Object {
         match self {
             Object::String { value, .. } => Some(value),
             Object::Function(_) => None,
+            Object::NativeFunction(_) => None,
         }
     }
 }
@@ -45,6 +52,7 @@ impl std::fmt::Display for Object {
                 Some(name) => write!(f, "<fn {}>", name),
                 None => write!(f, "<script>"),
             },
+            Object::NativeFunction(_) => write!(f, "<native function>"),
         }
     }
 }
@@ -100,6 +108,7 @@ impl PartialEq for Object {
             ) => left == right && left_hash == right_hash,
             // Functions compare by identity, never by their bytecode or constants.
             (Self::Function(_), Self::Function(_)) => std::ptr::eq(self, other),
+            (Self::NativeFunction(_), Self::NativeFunction(_)) => std::ptr::eq(self, other),
             _ => false,
         }
     }

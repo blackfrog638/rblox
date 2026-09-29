@@ -15,6 +15,7 @@ impl Value {
         match self.as_obj()? {
             Object::Function(function) => Some(function),
             Object::String { .. } => None,
+            Object::NativeFunction(_) => None,
         }
     }
 
@@ -36,6 +37,7 @@ impl Value {
         match self.as_obj()? {
             Object::String { value, .. } => Some(value),
             Object::Function(_) => None,
+            Object::NativeFunction(_) => None,
         }
     }
 }
