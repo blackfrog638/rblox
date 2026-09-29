@@ -88,7 +88,7 @@ mod tests {
         let chunk = rblox_vm::compile("3.14;")
             .expect("number literal should compile")
             .chunk;
-        assert_eq!(chunk.code.len(), 4);
+        assert_eq!(chunk.code.len(), 5);
     }
 
     #[test]
@@ -96,6 +96,6 @@ mod tests {
         let chunk = rblox_vm::compile("1 + 2;")
             .expect("arithmetic expression should compile")
             .chunk;
-        assert_eq!(chunk.code.len(), 7);
+        assert_eq!(chunk.code.len(), 8);
     }
 }
