@@ -211,6 +211,7 @@ impl VM {
                     println!("{}", value);
                 }
                 OP_RETURN => {
+                    let result = self.pop()?;
                     let frame = self
                         .call_stack
                         .pop()
@@ -220,10 +221,7 @@ impl VM {
                     if self.call_stack.is_empty() {
                         return Ok(());
                     }
-
-                    // User-defined functions currently return nil implicitly.
-                    // Keep that value as the result of the call expression.
-                    self.push(Value::Nil);
+                    self.push(result);
                 }
                 OP_POP => {
                     self.pop()?;
@@ -558,6 +556,7 @@ mod tests {
         chunk.write(1, 1);
         chunk.write(OP_DEFINE_GLOBAL, 1);
         chunk.write(name, 1);
+        chunk.write(OP_NIL, 1);
         chunk.write(OP_RETURN, 1);
 
         let function = Rc::new(Object::Function(ObjFunction {

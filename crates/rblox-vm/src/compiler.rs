@@ -443,6 +443,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.break_statement()
             }
+            TokenKind::Return => {
+                self.advance();
+                self.return_statement()
+            }
             TokenKind::If => {
                 self.advance();
                 self.if_statement()
@@ -457,6 +461,22 @@ impl<'a> Parser<'a> {
             }
             _ => self.expression_statement(),
         }
+    }
+
+    fn return_statement(&mut self) -> Result<(), String> {
+        if self.function_type == FunctionType::Script {
+            return Err("Compile error: Can't return from top-level code.".to_string());
+        }
+
+        if self.match_token(TokenKind::Semicolon) {
+            self.emit(OP_NIL);
+        } else {
+            self.expression()?;
+            self.consume(TokenKind::Semicolon, "Expected ';' after return value.")?;
+        }
+
+        self.emit(OP_RETURN);
+        Ok(())
     }
 
     fn if_statement(&mut self) -> Result<(), String> {
@@ -890,9 +910,8 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_return(&mut self) {
-        match self.function_type {
-            FunctionType::Function | FunctionType::Script => self.emit(OP_RETURN),
-        }
+        self.emit(OP_NIL);
+        self.emit(OP_RETURN);
     }
 
     fn peek(&self) -> &Token<'a> {
@@ -951,7 +970,7 @@ mod tests {
 
         assert_eq!(
             script.chunk.code,
-            vec![OP_CONSTANT, 1, OP_DEFINE_GLOBAL, 0, OP_RETURN]
+            vec![OP_CONSTANT, 1, OP_DEFINE_GLOBAL, 0, OP_NIL, OP_RETURN]
         );
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
@@ -963,7 +982,7 @@ mod tests {
         assert_eq!(function.arity, 0);
         assert_eq!(
             function.chunk.code,
-            vec![OP_CONSTANT, 0, OP_PRINT, OP_RETURN]
+            vec![OP_CONSTANT, 0, OP_PRINT, OP_NIL, OP_RETURN]
         );
     }
 
@@ -988,6 +1007,7 @@ mod tests {
                 2,
                 OP_ADD,
                 OP_PRINT,
+                OP_NIL,
                 OP_RETURN
             ]
         );
@@ -998,7 +1018,7 @@ mod tests {
         let chunk = compile("3.14;")
             .expect("number literal should compile")
             .chunk;
-        assert_eq!(chunk.code.len(), 4);
+        assert_eq!(chunk.code.len(), 5);
     }
 
     #[test]
@@ -1006,7 +1026,7 @@ mod tests {
         let chunk = compile("1 + 2;")
             .expect("simple expression should compile")
             .chunk;
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 17, 16]);
+        assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 17, OP_NIL, OP_RETURN]);
     }
 
     #[test]
@@ -1014,7 +1034,10 @@ mod tests {
         let chunk = compile("1 + 2 * 3;")
             .expect("precedence should compile")
             .chunk;
-        assert_eq!(chunk.code, vec![0, 0, 0, 1, 0, 2, 11, 9, 17, 16]);
+        assert_eq!(
+            chunk.code,
+            vec![0, 0, 0, 1, 0, 2, 11, 9, 17, OP_NIL, OP_RETURN]
+        );
     }
 
     #[test]
@@ -1073,7 +1096,7 @@ mod tests {
         let chunk = compile("1 < 2 == true;")
             .expect("comparison should compile")
             .chunk;
-        assert_eq!(chunk.code.len(), 9);
+        assert_eq!(chunk.code.len(), 10);
     }
 
     #[test]
@@ -1081,7 +1104,7 @@ mod tests {
         let chunk = compile("var breakfast = \"beignets\";")
             .expect("variable should compile")
             .chunk;
-        assert_eq!(chunk.code, vec![0, 1, 18, 0, 16]);
+        assert_eq!(chunk.code, vec![0, 1, 18, 0, OP_NIL, OP_RETURN]);
         assert_eq!(chunk.constants.len(), 2);
     }
 
@@ -1092,7 +1115,7 @@ mod tests {
             .chunk;
         assert_eq!(
             chunk.code,
-            vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, 16]
+            vec![0, 1, 18, 0, 0, 3, 20, 2, 17, 19, 4, 15, OP_NIL, OP_RETURN]
         );
     }
 
@@ -1116,7 +1139,16 @@ mod tests {
 
         assert_eq!(
             chunk.code,
-            vec![OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_PRINT, OP_POP, OP_RETURN]
+            vec![
+                OP_CONSTANT,
+                0,
+                OP_GET_LOCAL,
+                1,
+                OP_PRINT,
+                OP_POP,
+                OP_NIL,
+                OP_RETURN
+            ]
         );
     }
 
@@ -1144,6 +1176,7 @@ mod tests {
                 1,
                 OP_PRINT,
                 OP_POP,
+                OP_NIL,
                 OP_RETURN,
             ]
         );
@@ -1169,6 +1202,7 @@ mod tests {
                 1,
                 OP_PRINT,
                 OP_POP,
+                OP_NIL,
                 OP_RETURN,
             ]
         );
