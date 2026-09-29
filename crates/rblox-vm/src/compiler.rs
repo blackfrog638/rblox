@@ -3,7 +3,9 @@ use crate::chunk::{
     OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE,
     OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
 };
-use crate::object::{ObjFunction, allocate_string};
+use std::rc::Rc;
+
+use crate::object::{ObjFunction, Object, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
@@ -62,8 +64,6 @@ struct LoopContext {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FunctionType {
-    // Function declarations will construct this variant in the next stage.
-    #[allow(dead_code)]
     Function,
     Script,
 }
@@ -228,11 +228,12 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) -> Result<(), String> {
-        let result = if self.match_token(TokenKind::Var) {
+        let result = if self.match_token(TokenKind::Fun) {
+            self.fun_declaration()
+        } else if self.match_token(TokenKind::Var) {
             self.var_declaration()
         } else {
-            let result = self.statement();
-            result
+            self.statement()
         };
 
         if result.is_err() {
@@ -244,16 +245,63 @@ impl<'a> Parser<'a> {
         result
     }
 
+    fn fun_declaration(&mut self) -> Result<(), String> {
+        let name = self.consume_identifier("Expect function name.")?;
+        let global = self.declare_variable(name)?;
+
+        if global.is_none() {
+            self.mark_initialized();
+        }
+
+        let function = self.compile_function(name)?;
+        self.emit_constant(Value::Obj(Rc::new(Object::Function(function))));
+
+        if let Some(global) = global {
+            self.define_variable(global);
+        }
+        Ok(())
+    }
+
+    fn compile_function(&mut self, name: Token<'a>) -> Result<ObjFunction, String> {
+        let mut function_compiler = Parser::new(self.tokens, FunctionType::Function);
+        function_compiler.current = self.current;
+        function_compiler.function.name = Some(name.lexeme.to_string());
+        function_compiler.begin_scope();
+
+        let result = (|| {
+            function_compiler.consume(TokenKind::LeftParen, "Expect '(' after function name.")?;
+            if !function_compiler.match_token(TokenKind::RightParen) {
+                loop {
+                    if function_compiler.function.arity == u8::MAX as usize {
+                        return Err(
+                            "Compile error: Can't have more than 255 parameters.".to_string()
+                        );
+                    }
+                    function_compiler.function.arity += 1;
+                    let parameter =
+                        function_compiler.consume_identifier("Expect parameter name.")?;
+                    function_compiler.declare_local(parameter)?;
+                    function_compiler.mark_initialized();
+
+                    if !function_compiler.match_token(TokenKind::Comma) {
+                        break;
+                    }
+                }
+                function_compiler.consume(TokenKind::RightParen, "Expect ')' after parameters.")?;
+            }
+            function_compiler.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+            function_compiler.block()?;
+            function_compiler.emit_return();
+            Ok(())
+        })();
+
+        self.current = function_compiler.current;
+        result.map(|()| function_compiler.function)
+    }
+
     fn var_declaration(&mut self) -> Result<(), String> {
         let name = self.consume_identifier("Expect variable name.")?;
-        let global = (self.scope_depth == 0).then(|| {
-            self.current_chunk()
-                .add_constant(allocate_string(name.lexeme.to_string()))
-        });
-
-        if self.scope_depth > 0 {
-            self.declare_local(name)?;
-        }
+        let global = self.declare_variable(name)?;
 
         if self.match_token(TokenKind::Equal) {
             self.expression()?;
@@ -272,6 +320,18 @@ impl<'a> Parser<'a> {
             self.mark_initialized();
         }
         Ok(())
+    }
+
+    fn declare_variable(&mut self, name: Token<'a>) -> Result<Option<u8>, String> {
+        if self.scope_depth == 0 {
+            Ok(Some(
+                self.current_chunk()
+                    .add_constant(allocate_string(name.lexeme.to_string())),
+            ))
+        } else {
+            self.declare_local(name)?;
+            Ok(None)
+        }
     }
 
     fn consume_identifier(&mut self, message: &str) -> Result<Token<'a>, String> {
@@ -852,6 +912,55 @@ mod tests {
         assert_eq!(function.arity, 0);
         assert_eq!(function.name, None);
         assert_eq!(function.chunk.code.last(), Some(&OP_RETURN));
+    }
+
+    #[test]
+    fn compile_declares_named_function_as_global() {
+        let script = compile("fun breakfast() { print \"beignets\"; }")
+            .expect("function declaration should compile");
+
+        assert_eq!(
+            script.chunk.code,
+            vec![OP_CONSTANT, 1, OP_DEFINE_GLOBAL, 0, OP_RETURN]
+        );
+        let Value::Obj(function) = &script.chunk.constants[1] else {
+            panic!("second constant should be the declared function");
+        };
+        let Object::Function(function) = function.as_ref() else {
+            panic!("first constant should be an ObjFunction");
+        };
+        assert_eq!(function.name.as_deref(), Some("breakfast"));
+        assert_eq!(function.arity, 0);
+        assert_eq!(
+            function.chunk.code,
+            vec![OP_CONSTANT, 0, OP_PRINT, OP_RETURN]
+        );
+    }
+
+    #[test]
+    fn compile_assigns_parameter_slots_after_the_function_slot() {
+        let script =
+            compile("fun sum(a, b) { print a + b; }").expect("function declaration should compile");
+
+        let Value::Obj(function) = &script.chunk.constants[1] else {
+            panic!("second constant should be the declared function");
+        };
+        let Object::Function(function) = function.as_ref() else {
+            panic!("first constant should be an ObjFunction");
+        };
+        assert_eq!(function.arity, 2);
+        assert_eq!(
+            function.chunk.code,
+            vec![
+                OP_GET_LOCAL,
+                1,
+                OP_GET_LOCAL,
+                2,
+                OP_ADD,
+                OP_PRINT,
+                OP_RETURN
+            ]
+        );
     }
 
     #[test]

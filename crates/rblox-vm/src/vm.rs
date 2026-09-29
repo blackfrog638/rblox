@@ -686,4 +686,24 @@ mod tests {
         };
         assert_eq!(vm.globals.get(&name), Some(&Value::Number(2.0)));
     }
+
+    #[test]
+    fn interpret_defines_function_global() {
+        let mut vm = VM::new();
+
+        vm.interpret("fun breakfast() { print \"beignets\"; }")
+            .expect("function declaration should run");
+
+        let name = match allocate_string("breakfast".to_string()) {
+            Value::Obj(object) => object,
+            _ => unreachable!(),
+        };
+        let function = vm
+            .globals
+            .get(&name)
+            .and_then(Value::as_function)
+            .expect("global should contain the declared function");
+        assert_eq!(function.name.as_deref(), Some("breakfast"));
+        assert_eq!(function.arity, 0);
+    }
 }
