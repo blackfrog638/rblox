@@ -75,6 +75,16 @@ pub struct ObjFunction {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: Option<String>,
+    pub upvalue_count: usize,
+    pub upvalues: Vec<UpvalueDesc>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpvalueDesc {
+    /// Slot in the enclosing frame or enclosing closure's upvalue array.
+    pub index: u8,
+    /// `true` captures a local slot; `false` forwards an enclosing upvalue.
+    pub is_local: bool,
 }
 
 /// Runtime function value, ready to own captured upvalues in the VM.
@@ -95,6 +105,8 @@ impl ObjFunction {
             arity: 0,
             chunk: Chunk::new(),
             name: None,
+            upvalue_count: 0,
+            upvalues: Vec::new(),
         }
     }
 }

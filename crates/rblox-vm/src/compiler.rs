@@ -1,12 +1,12 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE,
+    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS,
+    OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
-use crate::object::{Closure, ObjFunction, Object, allocate_string};
+use crate::object::{Closure, ObjFunction, Object, UpvalueDesc, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
@@ -27,7 +27,7 @@ pub fn compile(source: &str) -> Result<ObjFunction, String> {
         return Err(format!("Compile error: {}", token.lexeme));
     }
 
-    let mut parser = Parser::new(&tokens, FunctionType::Script);
+    let mut parser = Parser::new(&tokens, FunctionType::Script, None);
 
     let mut first_error = None;
     while !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -55,6 +55,24 @@ struct ParseRule {
 struct Local<'a> {
     name: Token<'a>,
     depth: usize,
+}
+
+#[derive(Clone)]
+struct LocalInfo {
+    name: String,
+    depth: usize,
+}
+
+struct EnclosingCompiler {
+    locals: Vec<LocalInfo>,
+    upvalues: Rc<RefCell<Vec<UpvalueDesc>>>,
+    enclosing: Option<Rc<EnclosingCompiler>>,
+}
+
+#[derive(Clone, Copy)]
+enum EnclosingBinding {
+    Local(u8),
+    Upvalue(u8),
 }
 
 struct LoopContext {
@@ -201,11 +219,17 @@ struct Parser<'a> {
     panic_mode: bool,
     scope_depth: usize,
     locals: Vec<Local<'a>>,
+    upvalues: Rc<RefCell<Vec<UpvalueDesc>>>,
+    enclosing: Option<Rc<EnclosingCompiler>>,
     loop_stack: Vec<LoopContext>,
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Token<'a>], function_type: FunctionType) -> Self {
+    fn new(
+        tokens: &'a [Token<'a>],
+        function_type: FunctionType,
+        enclosing: Option<Rc<EnclosingCompiler>>,
+    ) -> Self {
         let mut parser = Self {
             tokens,
             current: 0,
@@ -214,6 +238,8 @@ impl<'a> Parser<'a> {
             panic_mode: false,
             scope_depth: 0,
             locals: Vec::new(),
+            upvalues: Rc::new(RefCell::new(Vec::new())),
+            enclosing,
             loop_stack: Vec::new(),
         };
         parser.locals.push(Local {
@@ -267,7 +293,20 @@ impl<'a> Parser<'a> {
     }
 
     fn compile_function(&mut self, name: Token<'a>) -> Result<ObjFunction, String> {
-        let mut function_compiler = Parser::new(self.tokens, FunctionType::Function);
+        let enclosing = Rc::new(EnclosingCompiler {
+            locals: self
+                .locals
+                .iter()
+                .map(|local| LocalInfo {
+                    name: local.name.lexeme.to_string(),
+                    depth: local.depth,
+                })
+                .collect(),
+            upvalues: Rc::clone(&self.upvalues),
+            enclosing: self.enclosing.clone(),
+        });
+        let mut function_compiler =
+            Parser::new(self.tokens, FunctionType::Function, Some(enclosing));
         function_compiler.current = self.current;
         function_compiler.function.name = Some(name.lexeme.to_string());
         function_compiler.begin_scope();
@@ -300,7 +339,11 @@ impl<'a> Parser<'a> {
         })();
 
         self.current = function_compiler.current;
-        result.map(|()| function_compiler.function)
+        result.map(|()| {
+            function_compiler.function.upvalues = function_compiler.upvalues.borrow().clone();
+            function_compiler.function.upvalue_count = function_compiler.function.upvalues.len();
+            function_compiler.function
+        })
     }
 
     fn var_declaration(&mut self) -> Result<(), String> {
@@ -391,6 +434,72 @@ impl<'a> Parser<'a> {
         }
 
         Ok(None)
+    }
+
+    fn add_upvalue(
+        upvalues: &Rc<RefCell<Vec<UpvalueDesc>>>,
+        index: u8,
+        is_local: bool,
+    ) -> Result<u8, String> {
+        let mut upvalues = upvalues.borrow_mut();
+        if let Some(existing) = upvalues
+            .iter()
+            .position(|upvalue| upvalue.index == index && upvalue.is_local == is_local)
+        {
+            return Ok(existing as u8);
+        }
+
+        let slot = u8::try_from(upvalues.len())
+            .map_err(|_| "Compile error: Too many closure variables in function.".to_string())?;
+        upvalues.push(UpvalueDesc { index, is_local });
+        Ok(slot)
+    }
+
+    fn resolve_enclosing_binding(
+        compiler: &EnclosingCompiler,
+        name: &str,
+    ) -> Result<Option<EnclosingBinding>, String> {
+        for (index, local) in compiler.locals.iter().enumerate().rev() {
+            if local.name == name {
+                if local.depth == usize::MAX {
+                    return Err(
+                        "Compile error: Can't read local variable in its own initializer."
+                            .to_string(),
+                    );
+                }
+                let slot = u8::try_from(index).map_err(|_| {
+                    "Compile error: Too many local variables in function.".to_string()
+                })?;
+                return Ok(Some(EnclosingBinding::Local(slot)));
+            }
+        }
+
+        let Some(enclosing) = &compiler.enclosing else {
+            return Ok(None);
+        };
+        let Some(binding) = Self::resolve_enclosing_binding(enclosing, name)? else {
+            return Ok(None);
+        };
+        let (index, is_local) = match binding {
+            EnclosingBinding::Local(index) => (index, true),
+            EnclosingBinding::Upvalue(index) => (index, false),
+        };
+        let upvalue = Self::add_upvalue(&compiler.upvalues, index, is_local)?;
+        Ok(Some(EnclosingBinding::Upvalue(upvalue)))
+    }
+
+    fn resolve_upvalue(&self, name: &str) -> Result<Option<u8>, String> {
+        let Some(enclosing) = &self.enclosing else {
+            return Ok(None);
+        };
+        let Some(binding) = Self::resolve_enclosing_binding(enclosing, name)? else {
+            return Ok(None);
+        };
+        let (index, is_local) = match binding {
+            EnclosingBinding::Local(index) => (index, true),
+            EnclosingBinding::Upvalue(index) => (index, false),
+        };
+        Self::add_upvalue(&self.upvalues, index, is_local).map(Some)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -724,7 +833,12 @@ impl<'a> Parser<'a> {
     fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
         let local = self.resolve_local(&name)?;
-        let global = local.is_none().then(|| {
+        let upvalue = if local.is_none() {
+            self.resolve_upvalue(&name)?
+        } else {
+            None
+        };
+        let global = (local.is_none() && upvalue.is_none()).then(|| {
             self.current_chunk()
                 .add_constant(allocate_string(name.clone()))
         });
@@ -734,6 +848,9 @@ impl<'a> Parser<'a> {
             if let Some(slot) = local {
                 self.emit(OP_SET_LOCAL);
                 self.current_chunk().write(slot, 1);
+            } else if let Some(slot) = upvalue {
+                self.emit(OP_SET_UPVALUE);
+                self.current_chunk().write(slot, 1);
             } else {
                 self.emit(OP_SET_GLOBAL);
                 self.current_chunk()
@@ -742,6 +859,9 @@ impl<'a> Parser<'a> {
         } else {
             if let Some(slot) = local {
                 self.emit(OP_GET_LOCAL);
+                self.current_chunk().write(slot, 1);
+            } else if let Some(slot) = upvalue {
+                self.emit(OP_GET_UPVALUE);
                 self.current_chunk().write(slot, 1);
             } else {
                 self.emit(OP_GET_GLOBAL);
