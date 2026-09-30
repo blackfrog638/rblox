@@ -2,14 +2,14 @@ use std::rc::Rc;
 
 use rblox_vm::chunk::{OP_CONSTANT, OP_RETURN};
 use rblox_vm::{
-    Chunk, ObjFunction, ObjType, Object, Table, Value, allocate_string, disassemble_chunk,
+    Chunk, Closure, ObjFunction, ObjType, Object, Table, Value, allocate_string, disassemble_chunk,
 };
 
 fn function(name: Option<&str>) -> Value {
-    Value::Obj(Rc::new(Object::Function(ObjFunction {
+    Value::Obj(Rc::new(Object::Closure(Closure::new(ObjFunction {
         name: name.map(str::to_owned),
         ..ObjFunction::new()
-    })))
+    }))))
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn functions_compare_by_identity_and_strings_by_content() {
         allocate_string("same".into()),
         allocate_string("same".into())
     );
-    assert!(first.is_obj_type(ObjType::Function));
+    assert!(first.is_obj_type(ObjType::Closure));
     assert!(first.as_string().is_none());
     assert!(allocate_string("example".into()).as_function().is_none());
 }

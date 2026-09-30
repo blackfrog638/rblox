@@ -6,7 +6,7 @@ use crate::chunk::{
 };
 use std::rc::Rc;
 
-use crate::object::{ObjFunction, Object, allocate_string};
+use crate::object::{Closure, ObjFunction, Object, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
@@ -258,7 +258,7 @@ impl<'a> Parser<'a> {
         }
 
         let function = self.compile_function(name)?;
-        self.emit_constant(Value::Obj(Rc::new(Object::Function(function))));
+        self.emit_constant(Value::Obj(Rc::new(Object::Closure(Closure::new(function)))));
 
         if let Some(global) = global {
             self.define_variable(global);
@@ -975,9 +975,10 @@ mod tests {
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Function(function) = function.as_ref() else {
-            panic!("first constant should be an ObjFunction");
+        let Object::Closure(closure) = function.as_ref() else {
+            panic!("function constant should be a Closure");
         };
+        let function = &closure.function;
         assert_eq!(function.name.as_deref(), Some("breakfast"));
         assert_eq!(function.arity, 0);
         assert_eq!(
@@ -994,9 +995,10 @@ mod tests {
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Function(function) = function.as_ref() else {
-            panic!("first constant should be an ObjFunction");
+        let Object::Closure(closure) = function.as_ref() else {
+            panic!("function constant should be a Closure");
         };
+        let function = &closure.function;
         assert_eq!(function.arity, 2);
         assert_eq!(
             function.chunk.code,

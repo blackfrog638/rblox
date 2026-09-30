@@ -7,14 +7,14 @@ pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjType {
     String,
-    Function,
+    Closure,
     NativeFunction,
 }
 
 #[derive(Clone, Debug)]
 pub enum Object {
     String { value: String, hash: u32 },
-    Function(ObjFunction),
+    Closure(Closure),
     NativeFunction(NativeFn),
 }
 
@@ -22,7 +22,7 @@ impl Object {
     pub fn obj_type(&self) -> ObjType {
         match self {
             Object::String { .. } => ObjType::String,
-            Object::Function(_) => ObjType::Function,
+            Object::Closure(_) => ObjType::Closure,
             Object::NativeFunction(_) => ObjType::NativeFunction,
         }
     }
@@ -30,7 +30,7 @@ impl Object {
     pub fn string_hash(&self) -> Option<u32> {
         match self {
             Object::String { hash, .. } => Some(*hash),
-            Object::Function(_) => None,
+            Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
         }
     }
@@ -38,7 +38,7 @@ impl Object {
     pub fn string_value(&self) -> Option<&str> {
         match self {
             Object::String { value, .. } => Some(value),
-            Object::Function(_) => None,
+            Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
         }
     }
@@ -48,7 +48,7 @@ impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Object::String { value, .. } => write!(f, "{}", value),
-            Object::Function(function) => match &function.name {
+            Object::Closure(closure) => match &closure.function.name {
                 Some(name) => write!(f, "<fn {}>", name),
                 None => write!(f, "<script>"),
             },
@@ -75,6 +75,18 @@ pub struct ObjFunction {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: Option<String>,
+}
+
+/// Runtime function value, ready to own captured upvalues in the VM.
+#[derive(Clone, Debug)]
+pub struct Closure {
+    pub function: ObjFunction,
+}
+
+impl Closure {
+    pub fn new(function: ObjFunction) -> Self {
+        Self { function }
+    }
 }
 
 impl ObjFunction {
@@ -106,8 +118,8 @@ impl PartialEq for Object {
                     hash: right_hash,
                 },
             ) => left == right && left_hash == right_hash,
-            // Functions compare by identity, never by their bytecode or constants.
-            (Self::Function(_), Self::Function(_)) => std::ptr::eq(self, other),
+            // Closures compare by identity, never by their bytecode or constants.
+            (Self::Closure(_), Self::Closure(_)) => std::ptr::eq(self, other),
             (Self::NativeFunction(_), Self::NativeFunction(_)) => std::ptr::eq(self, other),
             _ => false,
         }

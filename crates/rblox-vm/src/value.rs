@@ -13,7 +13,7 @@ pub enum Value {
 impl Value {
     pub fn as_function(&self) -> Option<&ObjFunction> {
         match self.as_obj()? {
-            Object::Function(function) => Some(function),
+            Object::Closure(closure) => Some(&closure.function),
             Object::String { .. } => None,
             Object::NativeFunction(_) => None,
         }
@@ -36,7 +36,7 @@ impl Value {
     pub fn as_string(&self) -> Option<&String> {
         match self.as_obj()? {
             Object::String { value, .. } => Some(value),
-            Object::Function(_) => None,
+            Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
         }
     }

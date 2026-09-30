@@ -7,7 +7,7 @@ use crate::chunk::{
     OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
-use crate::object::{NativeFn, ObjFunction, Object, allocate_string};
+use crate::object::{Closure, NativeFn, ObjFunction, Object, allocate_string};
 use crate::table::Table;
 use crate::value::Value;
 
@@ -22,7 +22,7 @@ struct CallFrame {
 impl CallFrame {
     fn function(&self) -> Result<&ObjFunction, String> {
         match self.function.as_ref() {
-            Object::Function(function) => Ok(function),
+            Object::Closure(closure) => Ok(&closure.function),
             Object::String { .. } => Err("Call frame does not contain a function.".to_string()),
             Object::NativeFunction(_) => Err("Call frame does not contain a function.".to_string()),
         }
@@ -70,7 +70,7 @@ impl VM {
     fn interpret_function(&mut self, function: ObjFunction) -> Result<(), String> {
         self.reset_stack();
 
-        let function = Rc::new(Object::Function(function));
+        let function = Rc::new(Object::Closure(Closure::new(function)));
         self.push(Value::Obj(Rc::clone(&function)));
         self.push_call_frame(function, 0)?;
 
@@ -265,7 +265,7 @@ impl VM {
                         return Err(self.runtime_error("Can only call functions."));
                     };
                     match callee.as_ref() {
-                        Object::Function(_) => self.call_function(callee, arg_count)?,
+                        Object::Closure(_) => self.call_function(callee, arg_count)?,
                         Object::NativeFunction(function) => {
                             self.call_native(*function, callee_index, arg_count)?;
                         }
@@ -407,7 +407,7 @@ impl VM {
 
     fn call_function(&mut self, function: Rc<Object>, arg_count: usize) -> Result<(), String> {
         let arity = match function.as_ref() {
-            Object::Function(ObjFunction { arity, .. }) => *arity,
+            Object::Closure(closure) => closure.function.arity,
             Object::String { .. } => {
                 return Err(self.runtime_error("Can only call functions."));
             }
@@ -612,10 +612,10 @@ mod tests {
         chunk.write(OP_NIL, 1);
         chunk.write(OP_RETURN, 1);
 
-        let function = Rc::new(Object::Function(ObjFunction {
+        let function = Rc::new(Object::Closure(Closure::new(ObjFunction {
             chunk,
             ..ObjFunction::new()
-        }));
+        })));
         let mut vm = VM::new();
         let function_value = Value::Obj(Rc::clone(&function));
         vm.call_stack.push(CallFrame {
