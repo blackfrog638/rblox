@@ -4,7 +4,7 @@ use crate::chunk::{
     OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
     OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use crate::object::{Closure, ObjFunction, Object, UpvalueDesc, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
@@ -27,7 +27,7 @@ pub fn compile(source: &str) -> Result<ObjFunction, String> {
         return Err(format!("Compile error: {}", token.lexeme));
     }
 
-    let mut parser = Parser::new(&tokens, FunctionType::Script, None);
+    let mut parser = Parser::new(&tokens);
 
     let mut first_error = None;
     while !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -43,7 +43,7 @@ pub fn compile(source: &str) -> Result<ObjFunction, String> {
     }
 
     parser.emit_return();
-    Ok(parser.function)
+    Ok(parser.end_compiler())
 }
 
 struct ParseRule {
@@ -55,24 +55,6 @@ struct ParseRule {
 struct Local<'a> {
     name: Token<'a>,
     depth: usize,
-}
-
-#[derive(Clone)]
-struct LocalInfo {
-    name: String,
-    depth: usize,
-}
-
-struct EnclosingCompiler {
-    locals: Vec<LocalInfo>,
-    upvalues: Rc<RefCell<Vec<UpvalueDesc>>>,
-    enclosing: Option<Rc<EnclosingCompiler>>,
-}
-
-#[derive(Clone, Copy)]
-enum EnclosingBinding {
-    Local(u8),
-    Upvalue(u8),
 }
 
 struct LoopContext {
@@ -211,50 +193,103 @@ fn get_rule(kind: TokenKind) -> ParseRule {
     }
 }
 
-struct Parser<'a> {
-    tokens: &'a [Token<'a>],
-    current: usize,
+// One compiler per lexically nested function. Parser owns the whole stack.
+struct Compiler<'a> {
     function: ObjFunction,
     function_type: FunctionType,
-    panic_mode: bool,
     scope_depth: usize,
     locals: Vec<Local<'a>>,
-    upvalues: Rc<RefCell<Vec<UpvalueDesc>>>,
-    enclosing: Option<Rc<EnclosingCompiler>>,
+    upvalues: Vec<UpvalueDesc>,
     loop_stack: Vec<LoopContext>,
 }
 
-impl<'a> Parser<'a> {
-    fn new(
-        tokens: &'a [Token<'a>],
-        function_type: FunctionType,
-        enclosing: Option<Rc<EnclosingCompiler>>,
-    ) -> Self {
-        let mut parser = Self {
-            tokens,
-            current: 0,
+impl<'a> Compiler<'a> {
+    fn new(function_type: FunctionType) -> Self {
+        Self {
             function: ObjFunction::new(),
             function_type,
-            panic_mode: false,
             scope_depth: 0,
-            locals: Vec::new(),
-            upvalues: Rc::new(RefCell::new(Vec::new())),
-            enclosing,
+            // Slot zero holds the called function, before parameters and locals.
+            locals: vec![Local {
+                name: Token {
+                    kind: TokenKind::Identifier,
+                    lexeme: "",
+                    line: 0,
+                },
+                depth: 0,
+            }],
+            upvalues: Vec::new(),
             loop_stack: Vec::new(),
-        };
-        parser.locals.push(Local {
-            name: Token {
-                kind: TokenKind::Identifier,
-                lexeme: "",
-                line: 0,
-            },
-            depth: 0,
-        });
-        parser
+        }
+    }
+
+    fn resolve_local(&self, name: &str) -> Result<Option<u8>, String> {
+        for (index, local) in self.locals.iter().enumerate().rev() {
+            if local.name.lexeme == name {
+                if local.depth == usize::MAX {
+                    return Err(
+                        "Compile error: Can't read local variable in its own initializer."
+                            .to_string(),
+                    );
+                }
+                let slot = u8::try_from(index).map_err(|_| {
+                    "Compile error: Too many local variables in function.".to_string()
+                })?;
+                return Ok(Some(slot));
+            }
+        }
+        Ok(None)
+    }
+
+    fn add_upvalue(&mut self, index: u8, is_local: bool) -> Result<u8, String> {
+        if let Some(existing) = self
+            .upvalues
+            .iter()
+            .position(|upvalue| upvalue.index == index && upvalue.is_local == is_local)
+        {
+            return Ok(existing as u8);
+        }
+        let slot = u8::try_from(self.upvalues.len())
+            .map_err(|_| "Compile error: Too many closure variables in function.".to_string())?;
+        self.upvalues.push(UpvalueDesc { index, is_local });
+        Ok(slot)
+    }
+}
+
+struct Parser<'a> {
+    tokens: &'a [Token<'a>],
+    current: usize,
+    panic_mode: bool,
+    compilers: Vec<Compiler<'a>>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(tokens: &'a [Token<'a>]) -> Self {
+        Self {
+            tokens,
+            current: 0,
+            panic_mode: false,
+            compilers: vec![Compiler::new(FunctionType::Script)],
+        }
+    }
+
+    fn current_compiler(&self) -> &Compiler<'a> {
+        self.compilers.last().expect("compiler must exist")
+    }
+
+    fn current_compiler_mut(&mut self) -> &mut Compiler<'a> {
+        self.compilers.last_mut().expect("compiler must exist")
+    }
+
+    fn end_compiler(&mut self) -> ObjFunction {
+        let mut compiler = self.compilers.pop().expect("compiler must exist");
+        compiler.function.upvalue_count = compiler.upvalues.len();
+        compiler.function.upvalues = compiler.upvalues;
+        compiler.function
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
-        &mut self.function.chunk
+        &mut self.current_compiler_mut().function.chunk
     }
 
     fn declaration(&mut self) -> Result<(), String> {
@@ -293,57 +328,40 @@ impl<'a> Parser<'a> {
     }
 
     fn compile_function(&mut self, name: Token<'a>) -> Result<ObjFunction, String> {
-        let enclosing = Rc::new(EnclosingCompiler {
-            locals: self
-                .locals
-                .iter()
-                .map(|local| LocalInfo {
-                    name: local.name.lexeme.to_string(),
-                    depth: local.depth,
-                })
-                .collect(),
-            upvalues: Rc::clone(&self.upvalues),
-            enclosing: self.enclosing.clone(),
-        });
-        let mut function_compiler =
-            Parser::new(self.tokens, FunctionType::Function, Some(enclosing));
-        function_compiler.current = self.current;
-        function_compiler.function.name = Some(name.lexeme.to_string());
-        function_compiler.begin_scope();
+        let mut compiler = Compiler::new(FunctionType::Function);
+        compiler.function.name = Some(name.lexeme.to_string());
+        self.compilers.push(compiler);
+        self.begin_scope();
 
         let result = (|| {
-            function_compiler.consume(TokenKind::LeftParen, "Expect '(' after function name.")?;
-            if !function_compiler.match_token(TokenKind::RightParen) {
+            self.consume(TokenKind::LeftParen, "Expect '(' after function name.")?;
+            if !self.match_token(TokenKind::RightParen) {
                 loop {
-                    if function_compiler.function.arity == u8::MAX as usize {
+                    if self.current_compiler().function.arity == u8::MAX as usize {
                         return Err(
                             "Compile error: Can't have more than 255 parameters.".to_string()
                         );
                     }
-                    function_compiler.function.arity += 1;
-                    let parameter =
-                        function_compiler.consume_identifier("Expect parameter name.")?;
-                    function_compiler.declare_local(parameter)?;
-                    function_compiler.mark_initialized();
+                    self.current_compiler_mut().function.arity += 1;
+                    let parameter = self.consume_identifier("Expect parameter name.")?;
+                    self.declare_local(parameter)?;
+                    self.mark_initialized();
 
-                    if !function_compiler.match_token(TokenKind::Comma) {
+                    if !self.match_token(TokenKind::Comma) {
                         break;
                     }
                 }
-                function_compiler.consume(TokenKind::RightParen, "Expect ')' after parameters.")?;
+                self.consume(TokenKind::RightParen, "Expect ')' after parameters.")?;
             }
-            function_compiler.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
-            function_compiler.block()?;
-            function_compiler.emit_return();
+            self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+            self.block()?;
+            self.emit_return();
             Ok(())
         })();
 
-        self.current = function_compiler.current;
-        result.map(|()| {
-            function_compiler.function.upvalues = function_compiler.upvalues.borrow().clone();
-            function_compiler.function.upvalue_count = function_compiler.function.upvalues.len();
-            function_compiler.function
-        })
+        // Restore the enclosing compiler even when the function failed to compile.
+        let function = self.end_compiler();
+        result.map(|()| function)
     }
 
     fn var_declaration(&mut self) -> Result<(), String> {
@@ -370,7 +388,7 @@ impl<'a> Parser<'a> {
     }
 
     fn declare_variable(&mut self, name: Token<'a>) -> Result<Option<u8>, String> {
-        if self.scope_depth == 0 {
+        if self.current_compiler().scope_depth == 0 {
             Ok(Some(
                 self.current_chunk()
                     .add_constant(allocate_string(name.lexeme.to_string())),
@@ -390,8 +408,8 @@ impl<'a> Parser<'a> {
     }
 
     fn declare_local(&mut self, name: Token<'a>) -> Result<(), String> {
-        for local in self.locals.iter().rev() {
-            if local.depth < self.scope_depth {
+        for local in self.current_compiler().locals.iter().rev() {
+            if local.depth < self.current_compiler().scope_depth {
                 break;
             }
             if local.name.lexeme == name.lexeme {
@@ -401,7 +419,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.locals.push(Local {
+        self.current_compiler_mut().locals.push(Local {
             name,
             depth: usize::MAX,
         });
@@ -409,97 +427,31 @@ impl<'a> Parser<'a> {
     }
 
     fn mark_initialized(&mut self) {
-        if self.scope_depth == 0 {
+        if self.current_compiler().scope_depth == 0 {
             return;
         }
 
-        let local = self.locals.last_mut().expect("local must be declared");
-        local.depth = self.scope_depth;
+        let compiler = self.current_compiler_mut();
+        let local = compiler.locals.last_mut().expect("local must be declared");
+        local.depth = compiler.scope_depth;
     }
 
-    fn resolve_local(&self, name: &str) -> Result<Option<u8>, String> {
-        for (index, local) in self.locals.iter().enumerate().rev() {
-            if local.name.lexeme == name {
-                if local.depth == usize::MAX {
-                    return Err(
-                        "Compile error: Can't read local variable in its own initializer."
-                            .to_string(),
-                    );
-                }
-                let slot = u8::try_from(index).map_err(|_| {
-                    "Compile error: Too many local variables in function.".to_string()
-                })?;
-                return Ok(Some(slot));
-            }
+    fn resolve_upvalue(&mut self, compiler: usize, name: &str) -> Result<Option<u8>, String> {
+        if compiler == 0 {
+            return Ok(None);
         }
+        let enclosing = compiler - 1;
 
+        if let Some(local) = self.compilers[enclosing].resolve_local(name)? {
+            return self.compilers[compiler].add_upvalue(local, true).map(Some);
+        }
+        // On the way back, intermediate functions forward the enclosing upvalue.
+        if let Some(upvalue) = self.resolve_upvalue(enclosing, name)? {
+            return self.compilers[compiler]
+                .add_upvalue(upvalue, false)
+                .map(Some);
+        }
         Ok(None)
-    }
-
-    fn add_upvalue(
-        upvalues: &Rc<RefCell<Vec<UpvalueDesc>>>,
-        index: u8,
-        is_local: bool,
-    ) -> Result<u8, String> {
-        let mut upvalues = upvalues.borrow_mut();
-        if let Some(existing) = upvalues
-            .iter()
-            .position(|upvalue| upvalue.index == index && upvalue.is_local == is_local)
-        {
-            return Ok(existing as u8);
-        }
-
-        let slot = u8::try_from(upvalues.len())
-            .map_err(|_| "Compile error: Too many closure variables in function.".to_string())?;
-        upvalues.push(UpvalueDesc { index, is_local });
-        Ok(slot)
-    }
-
-    fn resolve_enclosing_binding(
-        compiler: &EnclosingCompiler,
-        name: &str,
-    ) -> Result<Option<EnclosingBinding>, String> {
-        for (index, local) in compiler.locals.iter().enumerate().rev() {
-            if local.name == name {
-                if local.depth == usize::MAX {
-                    return Err(
-                        "Compile error: Can't read local variable in its own initializer."
-                            .to_string(),
-                    );
-                }
-                let slot = u8::try_from(index).map_err(|_| {
-                    "Compile error: Too many local variables in function.".to_string()
-                })?;
-                return Ok(Some(EnclosingBinding::Local(slot)));
-            }
-        }
-
-        let Some(enclosing) = &compiler.enclosing else {
-            return Ok(None);
-        };
-        let Some(binding) = Self::resolve_enclosing_binding(enclosing, name)? else {
-            return Ok(None);
-        };
-        let (index, is_local) = match binding {
-            EnclosingBinding::Local(index) => (index, true),
-            EnclosingBinding::Upvalue(index) => (index, false),
-        };
-        let upvalue = Self::add_upvalue(&compiler.upvalues, index, is_local)?;
-        Ok(Some(EnclosingBinding::Upvalue(upvalue)))
-    }
-
-    fn resolve_upvalue(&self, name: &str) -> Result<Option<u8>, String> {
-        let Some(enclosing) = &self.enclosing else {
-            return Ok(None);
-        };
-        let Some(binding) = Self::resolve_enclosing_binding(enclosing, name)? else {
-            return Ok(None);
-        };
-        let (index, is_local) = match binding {
-            EnclosingBinding::Local(index) => (index, true),
-            EnclosingBinding::Upvalue(index) => (index, false),
-        };
-        Self::add_upvalue(&self.upvalues, index, is_local).map(Some)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -573,7 +525,7 @@ impl<'a> Parser<'a> {
     }
 
     fn return_statement(&mut self) -> Result<(), String> {
-        if self.function_type == FunctionType::Script {
+        if self.current_compiler().function_type == FunctionType::Script {
             return Err("Compile error: Can't return from top-level code.".to_string());
         }
 
@@ -612,9 +564,10 @@ impl<'a> Parser<'a> {
 
     fn while_statement(&mut self) -> Result<(), String> {
         let loop_start = self.current_chunk().code.len();
-        self.loop_stack.push(LoopContext {
+        let scope_depth = self.current_compiler().scope_depth;
+        self.current_compiler_mut().loop_stack.push(LoopContext {
             continue_target: loop_start,
-            scope_depth: self.scope_depth,
+            scope_depth,
             break_jumps: Vec::new(),
         });
 
@@ -630,6 +583,7 @@ impl<'a> Parser<'a> {
         self.patch_jump(exit_jump);
         self.emit(OP_POP);
         let break_jumps = self
+            .current_compiler_mut()
             .loop_stack
             .pop()
             .expect("loop context must exist")
@@ -642,6 +596,7 @@ impl<'a> Parser<'a> {
 
     fn continue_statement(&mut self) -> Result<(), String> {
         let Some((scope_depth, continue_target)) = self
+            .current_compiler()
             .loop_stack
             .last()
             .map(|loop_context| (loop_context.scope_depth, loop_context.continue_target))
@@ -657,6 +612,7 @@ impl<'a> Parser<'a> {
 
     fn break_statement(&mut self) -> Result<(), String> {
         let Some(loop_scope_depth) = self
+            .current_compiler()
             .loop_stack
             .last()
             .map(|loop_context| loop_context.scope_depth)
@@ -667,7 +623,8 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::Semicolon, "Expected ';' after 'break'.")?;
         self.emit_loop_cleanup(loop_scope_depth);
         let jump = self.emit_jump(OP_JUMP);
-        self.loop_stack
+        self.current_compiler_mut()
+            .loop_stack
             .last_mut()
             .expect("break targets must exist")
             .break_jumps
@@ -691,9 +648,10 @@ impl<'a> Parser<'a> {
 
         let mut loop_start = self.current_chunk().code.len();
         let mut exit_jump = None;
-        self.loop_stack.push(LoopContext {
+        let scope_depth = self.current_compiler().scope_depth;
+        self.current_compiler_mut().loop_stack.push(LoopContext {
             continue_target: loop_start,
-            scope_depth: self.scope_depth,
+            scope_depth,
             break_jumps: Vec::new(),
         });
 
@@ -713,7 +671,8 @@ impl<'a> Parser<'a> {
             self.emit_loop(loop_start);
             self.patch_jump(body_jump);
             loop_start = increment_start;
-            self.loop_stack
+            self.current_compiler_mut()
+                .loop_stack
                 .last_mut()
                 .expect("loop context must exist")
                 .continue_target = loop_start;
@@ -730,6 +689,7 @@ impl<'a> Parser<'a> {
         }
 
         let break_jumps = self
+            .current_compiler_mut()
             .loop_stack
             .pop()
             .expect("loop context must exist")
@@ -749,7 +709,7 @@ impl<'a> Parser<'a> {
     }
 
     fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+        self.current_compiler_mut().scope_depth += 1;
     }
 
     fn block(&mut self) -> Result<(), String> {
@@ -761,19 +721,21 @@ impl<'a> Parser<'a> {
     }
 
     fn end_scope(&mut self) {
-        self.scope_depth -= 1;
+        self.current_compiler_mut().scope_depth -= 1;
         while self
+            .current_compiler()
             .locals
             .last()
-            .is_some_and(|local| local.depth > self.scope_depth)
+            .is_some_and(|local| local.depth > self.current_compiler().scope_depth)
         {
             self.emit(OP_POP);
-            self.locals.pop();
+            self.current_compiler_mut().locals.pop();
         }
     }
 
     fn emit_loop_cleanup(&mut self, target_scope_depth: usize) {
         let cleanup_count = self
+            .current_compiler()
             .locals
             .iter()
             .rev()
@@ -832,9 +794,9 @@ impl<'a> Parser<'a> {
 
     fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
-        let local = self.resolve_local(&name)?;
+        let local = self.current_compiler().resolve_local(&name)?;
         let upvalue = if local.is_none() {
-            self.resolve_upvalue(&name)?
+            self.resolve_upvalue(self.compilers.len() - 1, &name)?
         } else {
             None
         };
@@ -1073,6 +1035,27 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_function_error_restores_the_enclosing_compiler() {
+        let mut scanner = Scanner::new("fun outer() { fun broken() { print ; } }");
+        let mut tokens = Vec::new();
+        loop {
+            let token = scanner.scan_token();
+            tokens.push(token);
+            if token.kind == TokenKind::Eof {
+                break;
+            }
+        }
+        let mut parser = Parser::new(&tokens);
+        assert!(parser.declaration().is_err());
+        assert_eq!(parser.compilers.len(), 1);
+        let script = parser.current_compiler();
+        assert_eq!(script.function_type, FunctionType::Script);
+        assert_eq!(script.scope_depth, 0);
+        assert_eq!(script.locals.len(), 1);
+        assert!(script.loop_stack.is_empty());
+    }
 
     #[test]
     fn compile_returns_top_level_script_function() {
