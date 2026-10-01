@@ -4,13 +4,6 @@ use crate::{chunk::Chunk, value::Value};
 
 pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ObjType {
-    String,
-    Closure,
-    NativeFunction,
-}
-
 #[derive(Clone, Debug)]
 pub enum Object {
     String { value: String, hash: u32 },
@@ -19,14 +12,6 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn obj_type(&self) -> ObjType {
-        match self {
-            Object::String { .. } => ObjType::String,
-            Object::Closure(_) => ObjType::Closure,
-            Object::NativeFunction(_) => ObjType::NativeFunction,
-        }
-    }
-
     pub fn string_hash(&self) -> Option<u32> {
         match self {
             Object::String { hash, .. } => Some(*hash),

@@ -1,6 +1,6 @@
 use std::{fmt, rc::Rc};
 
-use crate::object::{ObjFunction, ObjType, Object};
+use crate::object::{ObjFunction, Object};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -19,13 +19,6 @@ impl Value {
         }
     }
 
-    pub fn is_obj_type(&self, obj_type: ObjType) -> bool {
-        match self {
-            Value::Obj(obj) => obj.obj_type() == obj_type,
-            _ => false,
-        }
-    }
-
     pub fn as_obj(&self) -> Option<&Object> {
         match self {
             Value::Obj(obj) => Some(obj.as_ref()),
@@ -40,10 +33,6 @@ impl Value {
             Object::NativeFunction(_) => None,
         }
     }
-}
-
-pub fn is_obj_type(value: &Value, obj_type: ObjType) -> bool {
-    value.is_obj_type(obj_type)
 }
 
 pub fn as_string(value: &Value) -> Option<&String> {
