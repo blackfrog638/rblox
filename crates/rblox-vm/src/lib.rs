@@ -16,6 +16,6 @@ pub use table::{Entry, Table};
 pub use vm::VM;
 
 pub use object::{
-    Closure, NativeFn, ObjFunction, Object, UpvalueDesc, allocate_string, hash_string,
+    Closure, NativeFn, ObjFunction, Object, Upvalue, UpvalueDesc, allocate_string, hash_string,
 };
 pub use value::Value;

@@ -7,24 +7,28 @@ pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
 #[derive(Clone, Debug)]
 pub enum Object {
     String { value: String, hash: u32 },
+    Function(Rc<ObjFunction>),
     Closure(Closure),
     NativeFunction(NativeFn),
+    Upvalue(Upvalue),
 }
 
 impl Object {
     pub fn string_hash(&self) -> Option<u32> {
         match self {
             Object::String { hash, .. } => Some(*hash),
-            Object::Closure(_) => None,
+            Object::Function(_) | Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
+            Object::Upvalue(_) => None,
         }
     }
 
     pub fn string_value(&self) -> Option<&str> {
         match self {
             Object::String { value, .. } => Some(value),
-            Object::Closure(_) => None,
+            Object::Function(_) | Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
+            Object::Upvalue(_) => None,
         }
     }
 }
@@ -33,11 +37,10 @@ impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Object::String { value, .. } => write!(f, "{}", value),
-            Object::Closure(closure) => match &closure.function.name {
-                Some(name) => write!(f, "<fn {}>", name),
-                None => write!(f, "<script>"),
-            },
+            Object::Function(function) => write!(f, "{}", function),
+            Object::Closure(closure) => write!(f, "{}", closure.function),
             Object::NativeFunction(_) => write!(f, "<native function>"),
+            Object::Upvalue(_) => write!(f, "<upvalue>"),
         }
     }
 }
@@ -72,15 +75,31 @@ pub struct UpvalueDesc {
     pub is_local: bool,
 }
 
-/// Runtime function value, ready to own captured upvalues in the VM.
+#[derive(Clone, Debug)]
+pub struct Upvalue {
+    pub location: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct Closure {
-    pub function: ObjFunction,
+    pub function: Rc<ObjFunction>,
+    pub upvalues: Vec<Rc<Upvalue>>,
 }
 
 impl Closure {
-    pub fn new(function: ObjFunction) -> Self {
-        Self { function }
+    pub fn new(function: impl Into<Rc<ObjFunction>>) -> Self {
+        let function = function.into();
+        let upvalues = Vec::with_capacity(function.upvalue_count);
+        Self { function, upvalues }
+    }
+}
+
+impl std::fmt::Display for ObjFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.name {
+            Some(name) => write!(f, "<fn {}>", name),
+            None => write!(f, "<script>"),
+        }
     }
 }
 

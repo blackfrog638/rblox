@@ -29,6 +29,7 @@ pub const OP_LOOP: u8 = 25;
 pub const OP_CALL: u8 = 26;
 pub const OP_GET_UPVALUE: u8 = 27;
 pub const OP_SET_UPVALUE: u8 = 28;
+pub const OP_CLOSURE: u8 = 29;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -198,6 +199,35 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             (line, next_offset)
         }
         OP_CALL => byte_instruction(chunk, offset, &prefix, "OP_CALL"),
+        OP_CLOSURE => {
+            let (mut text, mut next) = constant_instruction(chunk, offset, &prefix, "OP_CLOSURE");
+            let function = chunk
+                .code
+                .get(offset + 1)
+                .and_then(|index| chunk.constants.get(*index as usize))
+                .and_then(Value::as_function);
+            if let Some(function) = function {
+                for _ in 0..function.upvalue_count {
+                    let (Some(is_local), Some(index)) =
+                        (chunk.code.get(next), chunk.code.get(next + 1))
+                    else {
+                        text.push_str("\n     | <missing upvalue descriptor>");
+                        return (text, chunk.code.len());
+                    };
+                    let kind = match is_local {
+                        0 => "upvalue",
+                        1 => "local",
+                        _ => "invalid",
+                    };
+                    text.push_str(&format!(
+                        "\n{:04}    |                     {} {}",
+                        next, kind, index
+                    ));
+                    next += 2;
+                }
+            }
+            (text, next)
+        }
         OP_GET_UPVALUE => byte_instruction(chunk, offset, &prefix, "OP_GET_UPVALUE"),
         OP_SET_UPVALUE => byte_instruction(chunk, offset, &prefix, "OP_SET_UPVALUE"),
         _ => {

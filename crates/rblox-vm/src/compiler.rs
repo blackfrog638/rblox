@@ -1,12 +1,12 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS,
-    OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    Chunk, OP_ADD, OP_CALL, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL,
+    OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE,
+    OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN,
+    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use std::rc::Rc;
 
-use crate::object::{Closure, ObjFunction, Object, UpvalueDesc, allocate_string};
+use crate::object::{ObjFunction, Object, UpvalueDesc, allocate_string};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
@@ -319,7 +319,16 @@ impl<'a> Parser<'a> {
         }
 
         let function = self.compile_function(name)?;
-        self.emit_constant(Value::Obj(Rc::new(Object::Closure(Closure::new(function)))));
+        let captures = function.upvalues.clone();
+        let constant = self
+            .current_chunk()
+            .add_constant(Value::Obj(Rc::new(Object::Function(Rc::new(function)))));
+        self.emit(OP_CLOSURE);
+        self.emit(constant);
+        for capture in captures {
+            self.emit(u8::from(capture.is_local));
+            self.emit(capture.index);
+        }
 
         if let Some(global) = global {
             self.define_variable(global);
@@ -1073,15 +1082,14 @@ mod tests {
 
         assert_eq!(
             script.chunk.code,
-            vec![OP_CONSTANT, 1, OP_DEFINE_GLOBAL, 0, OP_NIL, OP_RETURN]
+            vec![OP_CLOSURE, 1, OP_DEFINE_GLOBAL, 0, OP_NIL, OP_RETURN]
         );
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Closure(closure) = function.as_ref() else {
-            panic!("function constant should be a Closure");
+        let Object::Function(function) = function.as_ref() else {
+            panic!("function constant should be a function prototype");
         };
-        let function = &closure.function;
         assert_eq!(function.name.as_deref(), Some("breakfast"));
         assert_eq!(function.arity, 0);
         assert_eq!(
@@ -1098,10 +1106,9 @@ mod tests {
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Closure(closure) = function.as_ref() else {
-            panic!("function constant should be a Closure");
+        let Object::Function(function) = function.as_ref() else {
+            panic!("function constant should be a function prototype");
         };
-        let function = &closure.function;
         assert_eq!(function.arity, 2);
         assert_eq!(
             function.chunk.code,

@@ -1,13 +1,13 @@
 use std::{rc::Rc, time::Instant};
 
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE,
-    OP_GET_GLOBAL, OP_GET_LOCAL, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
+    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL,
+    OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE,
+    OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN,
+    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
-use crate::object::{Closure, NativeFn, ObjFunction, Object, allocate_string};
+use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue, allocate_string};
 use crate::table::Table;
 use crate::value::Value;
 
@@ -23,8 +23,11 @@ impl CallFrame {
     fn function(&self) -> Result<&ObjFunction, String> {
         match self.function.as_ref() {
             Object::Closure(closure) => Ok(&closure.function),
-            Object::String { .. } => Err("Call frame does not contain a function.".to_string()),
+            Object::Function(_) | Object::String { .. } => {
+                Err("Call frame does not contain a function.".to_string())
+            }
             Object::NativeFunction(_) => Err("Call frame does not contain a function.".to_string()),
+            Object::Upvalue(_) => Err("Call frame does not contain a function.".to_string()),
         }
     }
 }
@@ -92,6 +95,49 @@ impl VM {
                 OP_CONSTANT => {
                     let constant = self.read_constant()?;
                     self.push(constant);
+                }
+                OP_CLOSURE => {
+                    let constant = self.read_constant()?;
+                    let Some(Object::Function(function)) = constant.as_obj() else {
+                        return Err(self.runtime_error("Closure constant must be a function."));
+                    };
+                    let mut closure = Closure::new(Rc::clone(function));
+                    for _ in 0..function.upvalue_count {
+                        let is_local = self.read_byte()?;
+                        let index = self.read_byte()? as usize;
+                        let upvalue = match is_local {
+                            1 => Rc::new(Upvalue {
+                                location: self.current_frame()?.stack_start + index,
+                            }),
+                            0 => Rc::clone(self.current_upvalue(index)?),
+                            _ => return Err(self.runtime_error("Invalid upvalue capture flag.")),
+                        };
+                        closure.upvalues.push(upvalue);
+                    }
+                    self.push(Value::Obj(Rc::new(Object::Closure(closure))));
+                }
+                OP_GET_UPVALUE => {
+                    let index = self.read_byte()? as usize;
+                    let location = self.current_upvalue(index)?.location;
+                    let value = self
+                        .stack
+                        .get(location)
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Invalid upvalue stack slot."))?;
+                    self.push(value);
+                }
+                OP_SET_UPVALUE => {
+                    let index = self.read_byte()? as usize;
+                    let location = self.current_upvalue(index)?.location;
+                    let value = self
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    if location >= self.stack.len() {
+                        return Err(self.runtime_error("Invalid upvalue stack slot."));
+                    }
+                    self.stack[location] = value;
                 }
                 OP_NIL => self.push(Value::Nil),
                 OP_TRUE => self.push(Value::Bool(true)),
@@ -269,7 +315,10 @@ impl VM {
                         Object::NativeFunction(function) => {
                             self.call_native(*function, callee_index, arg_count)?;
                         }
-                        Object::String { .. } => {
+                        Object::Function(_) | Object::String { .. } => {
+                            return Err(self.runtime_error("Can only call functions."));
+                        }
+                        Object::Upvalue(_) => {
                             return Err(self.runtime_error("Can only call functions."));
                         }
                     }
@@ -283,6 +332,16 @@ impl VM {
                 }
             }
         }
+    }
+
+    fn current_upvalue(&self, index: usize) -> Result<&Rc<Upvalue>, String> {
+        let Object::Closure(closure) = self.current_frame()?.function.as_ref() else {
+            return Err(self.runtime_error("Call frame does not contain a closure."));
+        };
+        closure
+            .upvalues
+            .get(index)
+            .ok_or_else(|| self.runtime_error("Invalid upvalue index."))
     }
 
     fn read_byte(&mut self) -> Result<u8, String> {
@@ -408,10 +467,13 @@ impl VM {
     fn call_function(&mut self, function: Rc<Object>, arg_count: usize) -> Result<(), String> {
         let arity = match function.as_ref() {
             Object::Closure(closure) => closure.function.arity,
-            Object::String { .. } => {
+            Object::Function(_) | Object::String { .. } => {
                 return Err(self.runtime_error("Can only call functions."));
             }
             Object::NativeFunction(_) => {
+                return Err(self.runtime_error("Can only call functions."));
+            }
+            Object::Upvalue(_) => {
                 return Err(self.runtime_error("Can only call functions."));
             }
         };

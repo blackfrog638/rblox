@@ -22,7 +22,7 @@ fn functions_compare_by_identity_and_strings_by_content() {
         allocate_string("same".into()),
         allocate_string("same".into())
     );
-    assert!(matches!(first, Value::Obj(obj) if matches!(obj.as_ref(), Object::Closure(_))));
+    assert!(matches!(first.as_obj(), Some(Object::Closure(_))));
     assert!(first.as_string().is_none());
     assert!(allocate_string("example".into()).as_function().is_none());
 }
