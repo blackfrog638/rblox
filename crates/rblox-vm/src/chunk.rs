@@ -30,6 +30,7 @@ pub const OP_CALL: u8 = 26;
 pub const OP_GET_UPVALUE: u8 = 27;
 pub const OP_SET_UPVALUE: u8 = 28;
 pub const OP_CLOSURE: u8 = 29;
+pub const OP_CLOSE_UPVALUE: u8 = 30;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -180,6 +181,10 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
         OP_SET_LOCAL => byte_instruction(chunk, offset, &prefix, "OP_SET_LOCAL"),
         OP_RETURN => {
             let line = format!("{}{}", prefix, simple_instruction("OP_RETURN"));
+            (line, offset + 1)
+        }
+        OP_CLOSE_UPVALUE => {
+            let line = format!("{}{}", prefix, simple_instruction("OP_CLOSE_UPVALUE"));
             (line, offset + 1)
         }
         OP_POP => {

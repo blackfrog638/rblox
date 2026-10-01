@@ -1,8 +1,8 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CALL, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL,
-    OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE,
-    OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN,
-    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    Chunk, OP_ADD, OP_CALL, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE,
+    OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP,
+    OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT,
+    OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use std::rc::Rc;
 
@@ -55,6 +55,7 @@ struct ParseRule {
 struct Local<'a> {
     name: Token<'a>,
     depth: usize,
+    is_captured: bool,
 }
 
 struct LoopContext {
@@ -217,6 +218,7 @@ impl<'a> Compiler<'a> {
                     line: 0,
                 },
                 depth: 0,
+                is_captured: false,
             }],
             upvalues: Vec::new(),
             loop_stack: Vec::new(),
@@ -431,6 +433,7 @@ impl<'a> Parser<'a> {
         self.current_compiler_mut().locals.push(Local {
             name,
             depth: usize::MAX,
+            is_captured: false,
         });
         Ok(())
     }
@@ -450,8 +453,9 @@ impl<'a> Parser<'a> {
             return Ok(None);
         }
         let enclosing = compiler - 1;
-
-        if let Some(local) = self.compilers[enclosing].resolve_local(name)? {
+        let local = self.compilers[enclosing].resolve_local(name)?;
+        if let Some(local) = local {
+            self.compilers[enclosing].locals[usize::from(local)].is_captured = true;
             return self.compilers[compiler].add_upvalue(local, true).map(Some);
         }
         // On the way back, intermediate functions forward the enclosing upvalue.
@@ -737,8 +741,16 @@ impl<'a> Parser<'a> {
             .last()
             .is_some_and(|local| local.depth > self.current_compiler().scope_depth)
         {
-            self.emit(OP_POP);
-            self.current_compiler_mut().locals.pop();
+            let local = self
+                .current_compiler_mut()
+                .locals
+                .pop()
+                .expect("scope cleanup local must exist");
+            self.emit(if local.is_captured {
+                OP_CLOSE_UPVALUE
+            } else {
+                OP_POP
+            });
         }
     }
 

@@ -37,6 +37,16 @@ fn closure_disassembly_consumes_local_and_forwarded_capture_operands() {
 }
 
 #[test]
+fn compiler_emits_and_disassembler_recognizes_close_upvalue() {
+    use rblox_vm::chunk::OP_CLOSE_UPVALUE;
+    use rblox_vm::{compile, disassemble_chunk};
+
+    let script = compile("{ var x = 1; fun inner() { print x; } }").unwrap();
+    assert!(script.chunk.code.contains(&OP_CLOSE_UPVALUE));
+    assert!(disassemble_chunk(&script.chunk, "close upvalue").contains("OP_CLOSE_UPVALUE"));
+}
+
+#[test]
 fn open_captures_share_mutations_and_forward_through_nested_closures() {
     VM::new()
         .interpret(
@@ -75,9 +85,10 @@ fn each_declaration_execution_creates_a_fresh_closure() {
 }
 
 #[test]
-fn returning_a_closure_leaves_its_capture_pointing_at_a_removed_stack_slot() {
-    let result = VM::new().interpret(
-        r#"
+fn returned_closures_still_need_runtime_upvalue_closing() {
+    let error = VM::new()
+        .interpret(
+            r#"
         fun outer() {
             var x = "outside";
             fun inner() { print x; }
@@ -86,8 +97,8 @@ fn returning_a_closure_leaves_its_capture_pointing_at_a_removed_stack_slot() {
         var closure = outer();
         closure();
     "#,
-    );
+        )
+        .expect_err("the runtime close-upvalue instruction is not implemented yet");
 
-    let error = result.expect_err("the open upvalue currently outlives its stack slot");
     assert!(error.contains("Invalid upvalue stack slot."), "{error}");
 }
