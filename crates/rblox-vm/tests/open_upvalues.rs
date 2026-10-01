@@ -73,3 +73,21 @@ fn each_declaration_execution_creates_a_fresh_closure() {
         )
         .unwrap();
 }
+
+#[test]
+fn returning_a_closure_leaves_its_capture_pointing_at_a_removed_stack_slot() {
+    let result = VM::new().interpret(
+        r#"
+        fun outer() {
+            var x = "outside";
+            fun inner() { print x; }
+            return inner;
+        }
+        var closure = outer();
+        closure();
+    "#,
+    );
+
+    let error = result.expect_err("the open upvalue currently outlives its stack slot");
+    assert!(error.contains("Invalid upvalue stack slot."), "{error}");
+}
