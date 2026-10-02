@@ -85,20 +85,85 @@ fn each_declaration_execution_creates_a_fresh_closure() {
 }
 
 #[test]
-fn returned_closures_still_need_runtime_upvalue_closing() {
-    let error = VM::new()
+fn returned_closures_keep_captured_variables_alive() {
+    VM::new()
         .interpret(
             r#"
         fun outer() {
             var x = "outside";
-            fun inner() { print x; }
+            fun inner() { print x; return x; }
             return inner;
         }
         var closure = outer();
         closure();
+        if (closure() != "outside") nil();
     "#,
         )
-        .expect_err("the runtime close-upvalue instruction is not implemented yet");
+        .unwrap();
+}
 
-    assert!(error.contains("Invalid upvalue stack slot."), "{error}");
+#[test]
+fn sibling_closures_share_a_closed_mutable_variable() {
+    VM::new()
+        .interpret(
+            r#"
+        var increment;
+        var read;
+        fun makeClosures() {
+            var value = 0;
+            fun inc() { value = value + 1; }
+            fun get() { return value; }
+            increment = inc;
+            read = get;
+        }
+        makeClosures();
+        increment();
+        if (read() != 1) nil();
+        increment();
+        if (read() != 2) nil();
+    "#,
+        )
+        .unwrap();
+}
+
+#[test]
+fn block_scope_closes_captured_local_before_its_slot_is_reused() {
+    VM::new()
+        .interpret(
+            r#"
+        var saved;
+        {
+            var value = "kept";
+            fun get() { return value; }
+            saved = get;
+        }
+        { var other = "replacement"; }
+        if (saved() != "kept") nil();
+    "#,
+        )
+        .unwrap();
+}
+
+#[test]
+fn loop_continue_and_break_close_captured_body_locals() {
+    VM::new()
+        .interpret(
+            r#"
+        var first;
+        var second;
+        for (var i = 0; i < 3; i = i + 1) {
+            var captured = i;
+            fun get() { return captured; }
+            if (i == 0) first = get;
+            if (i == 1) {
+                second = get;
+                continue;
+            }
+            if (i == 2) break;
+        }
+        if (first() != 0) nil();
+        if (second() != 1) nil();
+    "#,
+        )
+        .unwrap();
 }

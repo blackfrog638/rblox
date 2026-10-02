@@ -1,10 +1,11 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL,
-    OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE,
-    OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN,
-    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
+    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
+    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER,
+    OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR,
+    OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue, allocate_string};
@@ -121,26 +122,34 @@ impl VM {
                 }
                 OP_GET_UPVALUE => {
                     let index = self.read_byte()? as usize;
-                    let location = self.current_upvalue(index)?.location;
-                    let value = self
-                        .stack
-                        .get(location)
-                        .cloned()
-                        .ok_or_else(|| self.runtime_error("Invalid upvalue stack slot."))?;
+                    let upvalue = self.current_upvalue(index)?;
+                    let value = match upvalue.closed.borrow().as_ref() {
+                        Some(value) => value.clone(),
+                        None => self
+                            .stack
+                            .get(upvalue.location)
+                            .cloned()
+                            .ok_or_else(|| self.runtime_error("Invalid upvalue stack slot."))?,
+                    };
                     self.push(value);
                 }
                 OP_SET_UPVALUE => {
                     let index = self.read_byte()? as usize;
-                    let location = self.current_upvalue(index)?.location;
+                    let upvalue = Rc::clone(self.current_upvalue(index)?);
                     let value = self
                         .stack
                         .last()
                         .cloned()
                         .ok_or_else(|| self.runtime_error("Stack underflow."))?;
-                    if location >= self.stack.len() {
-                        return Err(self.runtime_error("Invalid upvalue stack slot."));
+                    let mut closed = upvalue.closed.borrow_mut();
+                    if let Some(closed) = closed.as_mut() {
+                        *closed = value;
+                    } else {
+                        if upvalue.location >= self.stack.len() {
+                            return Err(self.runtime_error("Invalid upvalue stack slot."));
+                        }
+                        self.stack[upvalue.location] = value;
                     }
-                    self.stack[location] = value;
                 }
                 OP_NIL => self.push(Value::Nil),
                 OP_TRUE => self.push(Value::Bool(true)),
@@ -266,6 +275,8 @@ impl VM {
                 }
                 OP_RETURN => {
                     let result = self.pop()?;
+                    let stack_start = self.current_frame()?.stack_start;
+                    self.close_upvalues(stack_start)?;
                     let frame = self
                         .call_stack
                         .pop()
@@ -326,6 +337,15 @@ impl VM {
                         }
                     }
                 }
+                OP_CLOSE_UPVALUE => {
+                    let last = self
+                        .stack
+                        .len()
+                        .checked_sub(1)
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    self.close_upvalues(last)?;
+                    self.pop()?;
+                }
                 _ => {
                     return Err(format!(
                         "Unknown opcode {} at offset {}",
@@ -335,6 +355,25 @@ impl VM {
                 }
             }
         }
+    }
+
+    fn close_upvalues(&mut self, last: usize) -> Result<(), String> {
+        while let Some(upvalue) = &self.open_upvalues {
+            if upvalue.location < last {
+                break;
+            }
+            let value = self
+                .stack
+                .get(upvalue.location)
+                .cloned()
+                .ok_or_else(|| self.runtime_error("Invalid upvalue stack slot."))?;
+            upvalue.closed.replace(Some(value));
+            // Closed nodes no longer belong to the open list. Detach their link
+            // so surviving closures do not retain unrelated open upvalues.
+            let next = upvalue.next.borrow_mut().take();
+            self.open_upvalues = next;
+        }
+        Ok(())
     }
 
     fn capture_upvalue(&mut self, location: usize) -> Rc<Upvalue> {
@@ -359,6 +398,7 @@ impl VM {
 
         let created = Rc::new(Upvalue {
             location,
+            closed: RefCell::new(None),
             next: RefCell::new(current),
         });
         if let Some(previous) = previous {
@@ -424,6 +464,9 @@ impl VM {
     }
 
     fn reset_stack(&mut self) {
+        // Globals may retain closures even after a runtime error.
+        // Preserve their captured variables before discarding the stack.
+        let _ = self.close_upvalues(0);
         self.stack.clear();
         self.call_stack.clear();
         self.open_upvalues = None;

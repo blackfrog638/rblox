@@ -755,15 +755,22 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_loop_cleanup(&mut self, target_scope_depth: usize) {
-        let cleanup_count = self
+        let cleanup_ops: Vec<_> = self
             .current_compiler()
             .locals
             .iter()
             .rev()
             .take_while(|local| local.depth > target_scope_depth)
-            .count();
-        for _ in 0..cleanup_count {
-            self.emit(OP_POP);
+            .map(|local| {
+                if local.is_captured {
+                    OP_CLOSE_UPVALUE
+                } else {
+                    OP_POP
+                }
+            })
+            .collect();
+        for opcode in cleanup_ops {
+            self.emit(opcode);
         }
     }
 

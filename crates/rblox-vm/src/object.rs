@@ -77,7 +77,10 @@ pub struct UpvalueDesc {
 
 #[derive(Clone, Debug)]
 pub struct Upvalue {
+    /// Absolute stack slot while open; ignored once `closed` contains a value.
     pub location: usize,
+    /// `None` reads the stack; `Some` owns the captured variable after closing.
+    pub closed: RefCell<Option<Value>>,
     pub next: RefCell<Option<Rc<Upvalue>>>,
 }
 
