@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{chunk::Chunk, value::Value};
 
@@ -78,6 +78,7 @@ pub struct UpvalueDesc {
 #[derive(Clone, Debug)]
 pub struct Upvalue {
     pub location: usize,
+    pub next: RefCell<Option<Rc<Upvalue>>>,
 }
 
 #[derive(Clone, Debug)]

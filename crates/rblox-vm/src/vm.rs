@@ -1,4 +1,4 @@
-use std::{rc::Rc, time::Instant};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL,
@@ -35,6 +35,7 @@ impl CallFrame {
 pub struct VM {
     call_stack: Vec<CallFrame>,
     stack: Vec<Value>,
+    open_upvalues: Option<Rc<Upvalue>>,
     globals: Table,
     trace_execution: bool,
     start_time: Instant,
@@ -45,6 +46,7 @@ impl VM {
         let mut vm = Self {
             call_stack: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::new(),
+            open_upvalues: None,
             globals: Table::new(),
             trace_execution: false,
             start_time: Instant::now(),
@@ -106,9 +108,10 @@ impl VM {
                         let is_local = self.read_byte()?;
                         let index = self.read_byte()? as usize;
                         let upvalue = match is_local {
-                            1 => Rc::new(Upvalue {
-                                location: self.current_frame()?.stack_start + index,
-                            }),
+                            1 => {
+                                let location = self.current_frame()?.stack_start + index;
+                                self.capture_upvalue(location)
+                            }
                             0 => Rc::clone(self.current_upvalue(index)?),
                             _ => return Err(self.runtime_error("Invalid upvalue capture flag.")),
                         };
@@ -334,6 +337,38 @@ impl VM {
         }
     }
 
+    fn capture_upvalue(&mut self, location: usize) -> Rc<Upvalue> {
+        let mut previous: Option<Rc<Upvalue>> = None;
+        let mut current = self.open_upvalues.as_ref().map(Rc::clone);
+
+        while let Some(upvalue) = &current {
+            if upvalue.location <= location {
+                break;
+            }
+            // Release the RefCell borrow before changing links or the cursor.
+            let next = upvalue.next.borrow().as_ref().map(Rc::clone);
+            previous = Some(Rc::clone(upvalue));
+            current = next;
+        }
+
+        if let Some(upvalue) = &current {
+            if upvalue.location == location {
+                return Rc::clone(upvalue);
+            }
+        }
+
+        let created = Rc::new(Upvalue {
+            location,
+            next: RefCell::new(current),
+        });
+        if let Some(previous) = previous {
+            *previous.next.borrow_mut() = Some(Rc::clone(&created));
+        } else {
+            self.open_upvalues = Some(Rc::clone(&created));
+        }
+        created
+    }
+
     fn current_upvalue(&self, index: usize) -> Result<&Rc<Upvalue>, String> {
         let Object::Closure(closure) = self.current_frame()?.function.as_ref() else {
             return Err(self.runtime_error("Call frame does not contain a closure."));
@@ -391,6 +426,7 @@ impl VM {
     fn reset_stack(&mut self) {
         self.stack.clear();
         self.call_stack.clear();
+        self.open_upvalues = None;
     }
 
     fn current_frame(&self) -> Result<&CallFrame, String> {
