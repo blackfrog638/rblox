@@ -83,9 +83,11 @@ fn run_source(vm: &mut rblox_vm::VM, source: &str) -> Result<(), u8> {
 
 #[cfg(test)]
 mod tests {
+    use rblox_vm::Heap;
     #[test]
     fn compile_accepts_number_literal() {
-        let chunk = rblox_vm::compile("3.14;")
+        let mut heap = Heap::new();
+        let chunk = rblox_vm::compile("3.14;", &mut heap)
             .expect("number literal should compile")
             .chunk;
         assert_eq!(chunk.code.len(), 5);
@@ -93,7 +95,8 @@ mod tests {
 
     #[test]
     fn compile_accepts_arithmetic_expression() {
-        let chunk = rblox_vm::compile("1 + 2;")
+        let mut heap = Heap::new();
+        let chunk = rblox_vm::compile("1 + 2;", &mut heap)
             .expect("arithmetic expression should compile")
             .chunk;
         assert_eq!(chunk.code.len(), 8);

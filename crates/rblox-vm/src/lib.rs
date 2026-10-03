@@ -1,5 +1,6 @@
 pub mod chunk;
 pub mod compiler;
+pub mod memory;
 pub mod object;
 pub mod scanner;
 pub mod table;
@@ -11,11 +12,10 @@ pub use chunk::{
     OP_RETURN, OP_SUBTRACT, disassemble_chunk, disassemble_instruction,
 };
 pub use compiler::compile;
+pub use memory::{Heap, ObjId};
 pub use scanner::{Scanner, Token, TokenKind};
 pub use table::{Entry, Table};
 pub use vm::VM;
 
-pub use object::{
-    Closure, NativeFn, ObjFunction, Object, Upvalue, UpvalueDesc, allocate_string, hash_string,
-};
+pub use object::{Closure, NativeFn, ObjFunction, Object, Upvalue, UpvalueDesc, hash_string};
 pub use value::Value;

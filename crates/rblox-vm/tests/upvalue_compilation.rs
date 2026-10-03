@@ -2,14 +2,14 @@ use rblox_vm::chunk::{
     OP_ADD, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_NIL, OP_POP, OP_PRINT, OP_RETURN,
     OP_SET_UPVALUE,
 };
-use rblox_vm::{ObjFunction, UpvalueDesc, Value, compile};
+use rblox_vm::{Heap, ObjFunction, UpvalueDesc, compile};
 
-fn child<'a>(parent: &'a ObjFunction, name: &str) -> &'a ObjFunction {
+fn child<'a>(parent: &ObjFunction, name: &str, heap: &'a Heap) -> &'a ObjFunction {
     parent
         .chunk
         .constants
         .iter()
-        .filter_map(Value::as_function)
+        .filter_map(|value| value.as_function(heap))
         .find(|function| function.name.as_deref() == Some(name))
         .expect("named function must be compiled into its parent")
 }
@@ -25,6 +25,7 @@ fn captures(function: &ObjFunction) -> Vec<(u8, bool)> {
 
 #[test]
 fn deep_capture_forwards_through_middle_and_reuses_slots_for_assignment() {
+    let mut heap = Heap::new();
     let script = compile(
         "fun outer() {
             var a = 1; var b = 2;
@@ -36,11 +37,12 @@ fn deep_capture_forwards_through_middle_and_reuses_slots_for_assignment() {
                 }
             }
         }",
+        &mut heap,
     )
     .unwrap();
-    let outer = child(&script, "outer");
-    let middle = child(outer, "middle");
-    let inner = child(middle, "inner");
+    let outer = child(&script, "outer", &heap);
+    let middle = child(outer, "middle", &heap);
+    let inner = child(middle, "inner", &heap);
 
     assert!(captures(outer).is_empty());
     assert_eq!(captures(middle), vec![(1, true), (2, true)]);
@@ -79,6 +81,7 @@ fn deep_capture_forwards_through_middle_and_reuses_slots_for_assignment() {
 
 #[test]
 fn shadowing_declaration_order_and_sibling_functions_keep_separate_bindings() {
+    let mut heap = Heap::new();
     let script = compile(
         "fun outer() {
             var x = 1;
@@ -91,16 +94,17 @@ fn shadowing_declaration_order_and_sibling_functions_keep_separate_bindings() {
             fun sibling() { print x; print later; }
             var later = 3;
         }",
+        &mut heap,
     )
     .unwrap();
-    let outer = child(&script, "outer");
-    let middle = child(outer, "middle");
-    let parameter = child(middle, "parameter");
-    let sibling = child(outer, "sibling");
+    let outer = child(&script, "outer", &heap);
+    let middle = child(outer, "middle", &heap);
+    let parameter = child(middle, "parameter", &heap);
+    let sibling = child(outer, "sibling", &heap);
 
     assert_eq!(captures(middle), vec![(1, true)]);
-    assert_eq!(captures(child(middle, "before")), vec![(0, false)]);
-    assert_eq!(captures(child(middle, "after")), vec![(2, true)]);
+    assert_eq!(captures(child(middle, "before", &heap)), vec![(0, false)]);
+    assert_eq!(captures(child(middle, "after", &heap)), vec![(2, true)]);
     assert!(captures(parameter).is_empty());
     assert_eq!(
         parameter.chunk.code,
@@ -122,19 +126,26 @@ fn shadowing_declaration_order_and_sibling_functions_keep_separate_bindings() {
         ]
     );
     assert_eq!(
-        sibling.chunk.constants[0].as_string().map(String::as_str),
+        sibling.chunk.constants[0]
+            .as_string(&heap)
+            .map(String::as_str),
         Some("later")
     );
 }
 
 #[test]
 fn nested_functions_have_their_own_loop_and_return_contexts() {
+    let mut heap = Heap::new();
     for statement in ["break;", "continue;"] {
         let source = format!("while (true) {{ fun inner() {{ {statement} }} }}");
-        assert!(compile(&source).unwrap_err().contains("outside of a loop"));
+        assert!(
+            compile(&source, &mut heap)
+                .unwrap_err()
+                .contains("outside of a loop")
+        );
     }
     assert!(
-        compile("fun inner() { return; } return;")
+        compile("fun inner() { return; } return;", &mut heap)
             .unwrap_err()
             .contains("top-level")
     );
@@ -143,7 +154,8 @@ fn nested_functions_have_their_own_loop_and_return_contexts() {
             "while (true) {
             fun inner() { while (true) { break; } return; }
             continue;
-        }"
+        }",
+            &mut heap
         )
         .is_ok()
     );

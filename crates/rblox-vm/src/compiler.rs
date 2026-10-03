@@ -4,13 +4,23 @@ use crate::chunk::{
     OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT,
     OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
-use std::rc::Rc;
+use crate::memory::Heap;
 
-use crate::object::{ObjFunction, Object, UpvalueDesc, allocate_string};
+use crate::object::{ObjFunction, Object, UpvalueDesc};
 use crate::scanner::{Scanner, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str) -> Result<ObjFunction, String> {
+/// Compile into the same heap that will execute the resulting function/chunk.
+/// The returned function is a builder value; nested prototypes and strings are
+/// already heap objects. The VM allocates the script prototype before running.
+///
+/// ```
+/// use rblox_vm::{compile, VM};
+/// let mut vm = VM::new();
+/// let script = compile("print \"hello\";", vm.heap_mut()).unwrap();
+/// vm.interpret_chunk(script.chunk).unwrap();
+/// ```
+pub fn compile(source: &str, heap: &mut Heap) -> Result<ObjFunction, String> {
     let mut scanner = Scanner::new(source);
     let mut tokens = Vec::new();
 
@@ -27,7 +37,7 @@ pub fn compile(source: &str) -> Result<ObjFunction, String> {
         return Err(format!("Compile error: {}", token.lexeme));
     }
 
-    let mut parser = Parser::new(&tokens);
+    let mut parser = Parser::new(&tokens, heap);
 
     let mut first_error = None;
     while !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -258,17 +268,19 @@ impl<'a> Compiler<'a> {
     }
 }
 
-struct Parser<'a> {
+struct Parser<'a, 'h> {
+    heap: &'h mut Heap,
     tokens: &'a [Token<'a>],
     current: usize,
     panic_mode: bool,
     compilers: Vec<Compiler<'a>>,
 }
 
-impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Token<'a>]) -> Self {
+impl<'a, 'h> Parser<'a, 'h> {
+    fn new(tokens: &'a [Token<'a>], heap: &'h mut Heap) -> Self {
         Self {
             tokens,
+            heap,
             current: 0,
             panic_mode: false,
             compilers: vec![Compiler::new(FunctionType::Script)],
@@ -322,9 +334,8 @@ impl<'a> Parser<'a> {
 
         let function = self.compile_function(name)?;
         let captures = function.upvalues.clone();
-        let constant = self
-            .current_chunk()
-            .add_constant(Value::Obj(Rc::new(Object::Function(Rc::new(function)))));
+        let function = self.heap.alloc(Object::Function(function));
+        let constant = self.current_chunk().add_constant(Value::Obj(function));
         self.emit(OP_CLOSURE);
         self.emit(constant);
         for capture in captures {
@@ -400,10 +411,8 @@ impl<'a> Parser<'a> {
 
     fn declare_variable(&mut self, name: Token<'a>) -> Result<Option<u8>, String> {
         if self.current_compiler().scope_depth == 0 {
-            Ok(Some(
-                self.current_chunk()
-                    .add_constant(allocate_string(name.lexeme.to_string())),
-            ))
+            let value = self.heap.alloc_string(name.lexeme.to_string());
+            Ok(Some(self.current_chunk().add_constant(value)))
         } else {
             self.declare_local(name)?;
             Ok(None)
@@ -829,8 +838,8 @@ impl<'a> Parser<'a> {
             None
         };
         let global = (local.is_none() && upvalue.is_none()).then(|| {
-            self.current_chunk()
-                .add_constant(allocate_string(name.clone()))
+            let value = self.heap.alloc_string(name.clone());
+            self.current_chunk().add_constant(value)
         });
 
         if can_assign && self.match_token(TokenKind::Equal) {
@@ -887,7 +896,8 @@ impl<'a> Parser<'a> {
         let string_token = self.previous();
         let string_value =
             string_token.lexeme.to_string()[1..string_token.lexeme.len() - 1].to_string(); // Remove the surrounding quotes
-        self.emit_constant(allocate_string(string_value));
+        let value = self.heap.alloc_string(string_value);
+        self.emit_constant(value);
         Ok(())
     }
 
@@ -1066,6 +1076,7 @@ mod tests {
 
     #[test]
     fn nested_function_error_restores_the_enclosing_compiler() {
+        let mut heap = Heap::new();
         let mut scanner = Scanner::new("fun outer() { fun broken() { print ; } }");
         let mut tokens = Vec::new();
         loop {
@@ -1075,7 +1086,7 @@ mod tests {
                 break;
             }
         }
-        let mut parser = Parser::new(&tokens);
+        let mut parser = Parser::new(&tokens, &mut heap);
         assert!(parser.declaration().is_err());
         assert_eq!(parser.compilers.len(), 1);
         let script = parser.current_compiler();
@@ -1087,7 +1098,8 @@ mod tests {
 
     #[test]
     fn compile_returns_top_level_script_function() {
-        let function = compile("nil;").expect("script should compile");
+        let mut heap = Heap::new();
+        let function = compile("nil;", &mut heap).expect("script should compile");
 
         assert_eq!(function.arity, 0);
         assert_eq!(function.name, None);
@@ -1096,7 +1108,8 @@ mod tests {
 
     #[test]
     fn compile_declares_named_function_as_global() {
-        let script = compile("fun breakfast() { print \"beignets\"; }")
+        let mut heap = Heap::new();
+        let script = compile("fun breakfast() { print \"beignets\"; }", &mut heap)
             .expect("function declaration should compile");
 
         assert_eq!(
@@ -1106,7 +1119,7 @@ mod tests {
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Function(function) = function.as_ref() else {
+        let Object::Function(function) = heap.get(*function) else {
             panic!("function constant should be a function prototype");
         };
         assert_eq!(function.name.as_deref(), Some("breakfast"));
@@ -1119,13 +1132,14 @@ mod tests {
 
     #[test]
     fn compile_assigns_parameter_slots_after_the_function_slot() {
-        let script =
-            compile("fun sum(a, b) { print a + b; }").expect("function declaration should compile");
+        let mut heap = Heap::new();
+        let script = compile("fun sum(a, b) { print a + b; }", &mut heap)
+            .expect("function declaration should compile");
 
         let Value::Obj(function) = &script.chunk.constants[1] else {
             panic!("second constant should be the declared function");
         };
-        let Object::Function(function) = function.as_ref() else {
+        let Object::Function(function) = heap.get(*function) else {
             panic!("function constant should be a function prototype");
         };
         assert_eq!(function.arity, 2);
@@ -1146,7 +1160,8 @@ mod tests {
 
     #[test]
     fn compile_accepts_number_literal() {
-        let chunk = compile("3.14;")
+        let mut heap = Heap::new();
+        let chunk = compile("3.14;", &mut heap)
             .expect("number literal should compile")
             .chunk;
         assert_eq!(chunk.code.len(), 5);
@@ -1154,7 +1169,8 @@ mod tests {
 
     #[test]
     fn compile_handles_simple_binary_expression() {
-        let chunk = compile("1 + 2;")
+        let mut heap = Heap::new();
+        let chunk = compile("1 + 2;", &mut heap)
             .expect("simple expression should compile")
             .chunk;
         assert_eq!(chunk.code, vec![0, 0, 0, 1, 9, 17, OP_NIL, OP_RETURN]);
@@ -1162,7 +1178,8 @@ mod tests {
 
     #[test]
     fn compile_respects_operator_precedence() {
-        let chunk = compile("1 + 2 * 3;")
+        let mut heap = Heap::new();
+        let chunk = compile("1 + 2 * 3;", &mut heap)
             .expect("precedence should compile")
             .chunk;
         assert_eq!(
@@ -1173,7 +1190,8 @@ mod tests {
 
     #[test]
     fn compile_supports_boolean_and_nil_literals() {
-        let chunk = compile("true and false or nil;")
+        let mut heap = Heap::new();
+        let chunk = compile("true and false or nil;", &mut heap)
             .expect("boolean and nil should compile")
             .chunk;
         assert!(chunk.code.len() >= 7);
@@ -1182,7 +1200,8 @@ mod tests {
 
     #[test]
     fn compile_supports_continue_statement() {
-        let chunk = compile("while (true) { continue; }")
+        let mut heap = Heap::new();
+        let chunk = compile("while (true) { continue; }", &mut heap)
             .expect("continue should compile")
             .chunk;
         assert!(chunk.code.contains(&OP_LOOP));
@@ -1190,7 +1209,8 @@ mod tests {
 
     #[test]
     fn compile_supports_break_statement() {
-        let chunk = compile("while (true) { break; }")
+        let mut heap = Heap::new();
+        let chunk = compile("while (true) { break; }", &mut heap)
             .expect("break should compile")
             .chunk;
         assert!(chunk.code.contains(&OP_JUMP));
@@ -1198,15 +1218,20 @@ mod tests {
 
     #[test]
     fn compile_rejects_break_outside_loop() {
-        let result = compile("break;");
+        let mut heap = Heap::new();
+        let result = compile("break;", &mut heap);
         assert!(result.is_err());
     }
 
     #[test]
     fn compile_supports_short_circuit_logic() {
-        let chunk = compile("var a = false and (1 / 0); var b = true or (1 / 0);")
-            .expect("logical short-circuit should compile")
-            .chunk;
+        let mut heap = Heap::new();
+        let chunk = compile(
+            "var a = false and (1 / 0); var b = true or (1 / 0);",
+            &mut heap,
+        )
+        .expect("logical short-circuit should compile")
+        .chunk;
 
         assert!(chunk.code.contains(&OP_JUMP_IF_FALSE));
         assert!(chunk.code.contains(&OP_JUMP));
@@ -1214,7 +1239,8 @@ mod tests {
 
     #[test]
     fn compile_generates_loop_for_for_statement() {
-        let chunk = compile("for (var i = 0; i < 3; i = i + 1) { print i; }")
+        let mut heap = Heap::new();
+        let chunk = compile("for (var i = 0; i < 3; i = i + 1) { print i; }", &mut heap)
             .expect("for loop should compile")
             .chunk;
 
@@ -1224,7 +1250,8 @@ mod tests {
 
     #[test]
     fn compile_supports_equality_and_comparison() {
-        let chunk = compile("1 < 2 == true;")
+        let mut heap = Heap::new();
+        let chunk = compile("1 < 2 == true;", &mut heap)
             .expect("comparison should compile")
             .chunk;
         assert_eq!(chunk.code.len(), 10);
@@ -1232,7 +1259,8 @@ mod tests {
 
     #[test]
     fn compile_defines_global_variable() {
-        let chunk = compile("var breakfast = \"beignets\";")
+        let mut heap = Heap::new();
+        let chunk = compile("var breakfast = \"beignets\";", &mut heap)
             .expect("variable should compile")
             .chunk;
         assert_eq!(chunk.code, vec![0, 1, 18, 0, OP_NIL, OP_RETURN]);
@@ -1241,7 +1269,8 @@ mod tests {
 
     #[test]
     fn compile_reads_and_assigns_global_variable() {
-        let chunk = compile("var a = 1; a = 2; print a;")
+        let mut heap = Heap::new();
+        let chunk = compile("var a = 1; a = 2; print a;", &mut heap)
             .expect("variables should compile")
             .chunk;
         assert_eq!(
@@ -1252,19 +1281,23 @@ mod tests {
 
     #[test]
     fn assignment_has_lower_precedence_and_is_right_associative() {
-        assert!(compile("var a; var b; a * (b = a * b);").is_ok());
-        assert!(compile("var a; var b; a = b = 3;").is_ok());
+        let mut heap = Heap::new();
+        assert!(compile("var a; var b; a * (b = a * b);", &mut heap).is_ok());
+        assert!(compile("var a; var b; a = b = 3;", &mut heap).is_ok());
     }
 
     #[test]
     fn multiplication_cannot_be_an_assignment_target() {
-        let error = compile("var a; var b; a * b = 3;").expect_err("invalid target should fail");
+        let mut heap = Heap::new();
+        let error =
+            compile("var a; var b; a * b = 3;", &mut heap).expect_err("invalid target should fail");
         assert!(error.contains("Invalid assignment target."));
     }
 
     #[test]
     fn compile_uses_local_slots_inside_blocks() {
-        let chunk = compile("{ var a = 1; print a; }")
+        let mut heap = Heap::new();
+        let chunk = compile("{ var a = 1; print a; }", &mut heap)
             .expect("local variable should compile")
             .chunk;
 
@@ -1285,9 +1318,13 @@ mod tests {
 
     #[test]
     fn compile_resolves_outer_block_locals_and_shadowing() {
-        let chunk = compile("{ var a = 1; { print a; var a = 2; print a; } print a; }")
-            .expect("nested local variables should compile")
-            .chunk;
+        let mut heap = Heap::new();
+        let chunk = compile(
+            "{ var a = 1; { print a; var a = 2; print a; } print a; }",
+            &mut heap,
+        )
+        .expect("nested local variables should compile")
+        .chunk;
 
         assert_eq!(
             chunk.code,
@@ -1315,7 +1352,8 @@ mod tests {
 
     #[test]
     fn compile_assigns_local_slots() {
-        let chunk = compile("{ var a = 1; a = 2; print a; }")
+        let mut heap = Heap::new();
+        let chunk = compile("{ var a = 1; a = 2; print a; }", &mut heap)
             .expect("local assignment should compile")
             .chunk;
 
@@ -1341,7 +1379,8 @@ mod tests {
 
     #[test]
     fn compile_generates_loop_for_while_statement() {
-        let chunk = compile("var i = 0; while (i < 3) { i = i + 1; }")
+        let mut heap = Heap::new();
+        let chunk = compile("var i = 0; while (i < 3) { i = i + 1; }", &mut heap)
             .expect("while loop should compile")
             .chunk;
 
@@ -1351,7 +1390,8 @@ mod tests {
 
     #[test]
     fn local_variable_cannot_be_read_in_its_initializer() {
-        let error = compile("{ var a = a; }").expect_err("self initializer should fail");
+        let mut heap = Heap::new();
+        let error = compile("{ var a = a; }", &mut heap).expect_err("self initializer should fail");
         assert!(error.contains("own initializer"));
     }
 }

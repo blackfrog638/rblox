@@ -1,28 +1,32 @@
-use rblox_vm::VM;
+use rblox_vm::{Heap, VM};
 
 #[test]
 fn closure_disassembly_consumes_local_and_forwarded_capture_operands() {
+    let mut heap = Heap::new();
     use rblox_vm::chunk::OP_CLOSURE;
     use rblox_vm::{compile, disassemble_instruction};
-    let script =
-        compile("fun outer() { var x = 1; fun middle() { fun inner() { return x; } } }").unwrap();
+    let script = compile(
+        "fun outer() { var x = 1; fun middle() { fun inner() { return x; } } }",
+        &mut heap,
+    )
+    .unwrap();
     let outer = script
         .chunk
         .constants
         .iter()
-        .find_map(|v| v.as_function())
+        .find_map(|v| v.as_function(&heap))
         .unwrap();
     let middle = outer
         .chunk
         .constants
         .iter()
-        .find_map(|v| v.as_function())
+        .find_map(|v| v.as_function(&heap))
         .unwrap();
     for (function, expected) in [(outer, "local 1"), (middle, "upvalue 0")] {
         let mut offset = 0;
         let mut found = false;
         while offset < function.chunk.code.len() {
-            let (text, next) = disassemble_instruction(&function.chunk, offset);
+            let (text, next) = disassemble_instruction(&function.chunk, offset, &heap);
             if function.chunk.code[offset] == OP_CLOSURE {
                 assert!(text.contains("OP_CLOSURE"));
                 assert!(text.contains(expected), "{text}");
@@ -38,12 +42,13 @@ fn closure_disassembly_consumes_local_and_forwarded_capture_operands() {
 
 #[test]
 fn compiler_emits_and_disassembler_recognizes_close_upvalue() {
+    let mut heap = Heap::new();
     use rblox_vm::chunk::OP_CLOSE_UPVALUE;
     use rblox_vm::{compile, disassemble_chunk};
 
-    let script = compile("{ var x = 1; fun inner() { print x; } }").unwrap();
+    let script = compile("{ var x = 1; fun inner() { print x; } }", &mut heap).unwrap();
     assert!(script.chunk.code.contains(&OP_CLOSE_UPVALUE));
-    assert!(disassemble_chunk(&script.chunk, "close upvalue").contains("OP_CLOSE_UPVALUE"));
+    assert!(disassemble_chunk(&script.chunk, "close upvalue", &heap).contains("OP_CLOSE_UPVALUE"));
 }
 
 #[test]

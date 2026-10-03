@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::{memory::Heap, value::Value};
 
 pub const OP_CONSTANT: u8 = 0;
 pub const OP_NIL: u8 = 1;
@@ -93,13 +93,13 @@ impl Chunk {
     }
 }
 
-pub fn disassemble_chunk(chunk: &Chunk, name: &str) -> String {
+pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) -> String {
     let mut output = String::new();
     output.push_str(&format!("== {} ==\n", name));
 
     let mut offset = 0;
     while offset < chunk.code.len() {
-        let (line, next_offset) = disassemble_instruction(chunk, offset);
+        let (line, next_offset) = disassemble_instruction(chunk, offset, heap);
         output.push_str(&line);
         output.push('\n');
         offset = next_offset;
@@ -108,12 +108,12 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) -> String {
     output
 }
 
-pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) {
+pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (String, usize) {
     let prefix = format_prefix(chunk, offset);
     let instruction = chunk.code[offset];
 
     match instruction {
-        OP_CONSTANT => constant_instruction(chunk, offset, &prefix, "OP_CONSTANT"),
+        OP_CONSTANT => constant_instruction(chunk, offset, &prefix, "OP_CONSTANT", heap),
         OP_NIL => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
             (line, offset + 1)
@@ -174,9 +174,9 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
             let line = format!("{}{}", prefix, simple_instruction("OP_PRINT"));
             (line, offset + 1)
         }
-        OP_DEFINE_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_DEFINE_GLOBAL"),
-        OP_GET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_GET_GLOBAL"),
-        OP_SET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_SET_GLOBAL"),
+        OP_DEFINE_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_DEFINE_GLOBAL", heap),
+        OP_GET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_GET_GLOBAL", heap),
+        OP_SET_GLOBAL => constant_instruction(chunk, offset, &prefix, "OP_SET_GLOBAL", heap),
         OP_GET_LOCAL => byte_instruction(chunk, offset, &prefix, "OP_GET_LOCAL"),
         OP_SET_LOCAL => byte_instruction(chunk, offset, &prefix, "OP_SET_LOCAL"),
         OP_RETURN => {
@@ -205,12 +205,13 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> (String, usize) 
         }
         OP_CALL => byte_instruction(chunk, offset, &prefix, "OP_CALL"),
         OP_CLOSURE => {
-            let (mut text, mut next) = constant_instruction(chunk, offset, &prefix, "OP_CLOSURE");
+            let (mut text, mut next) =
+                constant_instruction(chunk, offset, &prefix, "OP_CLOSURE", heap);
             let function = chunk
                 .code
                 .get(offset + 1)
                 .and_then(|index| chunk.constants.get(*index as usize))
-                .and_then(Value::as_function);
+                .and_then(|value| value.as_function(heap));
             if let Some(function) = function {
                 for _ in 0..function.upvalue_count {
                     let (Some(is_local), Some(index)) =
@@ -256,7 +257,13 @@ fn simple_instruction(name: &str) -> String {
     name.to_string()
 }
 
-fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (String, usize) {
+fn constant_instruction(
+    chunk: &Chunk,
+    offset: usize,
+    prefix: &str,
+    name: &str,
+    heap: &Heap,
+) -> (String, usize) {
     let Some(index) = chunk.code.get(offset + 1).copied() else {
         return (
             format!("{}{} <missing constant index>", prefix, name),
@@ -267,7 +274,7 @@ fn constant_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) 
     let value_text = chunk
         .constants
         .get(index as usize)
-        .map(|value| value.to_string())
+        .map(|value| value.display(heap).to_string())
         .unwrap_or_else(|| "<invalid constant index>".to_string());
 
     (
@@ -330,6 +337,7 @@ mod tests {
 
     #[test]
     fn disassemble_shows_constant_and_return() {
+        let heap = Heap::new();
         let mut chunk = Chunk::new();
         let constant_index = chunk.add_constant(Value::Number(3.14));
 
@@ -337,7 +345,7 @@ mod tests {
         chunk.write(constant_index, 123);
         chunk.write(OP_RETURN, 123);
 
-        let output = disassemble_chunk(&chunk, "test chunk");
+        let output = disassemble_chunk(&chunk, "test chunk", &heap);
 
         assert!(output.contains("== test chunk =="));
         assert!(output.contains("OP_CONSTANT"));
@@ -347,6 +355,7 @@ mod tests {
 
     #[test]
     fn disassemble_shows_arithmetic_opcodes() {
+        let heap = Heap::new();
         let mut chunk = Chunk::new();
         chunk.write(OP_ADD, 1);
         chunk.write(OP_SUBTRACT, 1);
@@ -355,7 +364,7 @@ mod tests {
         chunk.write(OP_NEGATE, 1);
         chunk.write(OP_RETURN, 1);
 
-        let output = disassemble_chunk(&chunk, "arith");
+        let output = disassemble_chunk(&chunk, "arith", &heap);
 
         assert!(output.contains("OP_ADD"));
         assert!(output.contains("OP_SUBTRACT"));

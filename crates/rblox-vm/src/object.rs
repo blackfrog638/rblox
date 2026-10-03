@@ -1,13 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
-
-use crate::{chunk::Chunk, value::Value};
+use crate::{chunk::Chunk, memory::ObjId, value::Value};
 
 pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
 
 #[derive(Clone, Debug)]
 pub enum Object {
     String { value: String, hash: u32 },
-    Function(Rc<ObjFunction>),
+    Function(ObjFunction),
     Closure(Closure),
     NativeFunction(NativeFn),
     Upvalue(Upvalue),
@@ -31,25 +29,6 @@ impl Object {
             Object::Upvalue(_) => None,
         }
     }
-}
-
-impl std::fmt::Display for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Object::String { value, .. } => write!(f, "{}", value),
-            Object::Function(function) => write!(f, "{}", function),
-            Object::Closure(closure) => write!(f, "{}", closure.function),
-            Object::NativeFunction(_) => write!(f, "<native function>"),
-            Object::Upvalue(_) => write!(f, "<upvalue>"),
-        }
-    }
-}
-
-pub fn allocate_string(value: String) -> Value {
-    Value::Obj(Rc::new(Object::String {
-        hash: hash_string(&value),
-        value,
-    }))
 }
 
 pub fn hash_string(value: &str) -> u32 {
@@ -79,21 +58,20 @@ pub struct UpvalueDesc {
 pub struct Upvalue {
     /// Absolute stack slot while open; ignored once `closed` contains a value.
     pub location: usize,
-    /// `None` reads the stack; `Some` owns the captured variable after closing.
-    pub closed: RefCell<Option<Value>>,
-    pub next: RefCell<Option<Rc<Upvalue>>>,
+    /// `None` reads the stack; `Some` holds the captured value after closing.
+    pub closed: Option<Value>,
+    pub next: Option<ObjId>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Closure {
-    pub function: Rc<ObjFunction>,
-    pub upvalues: Vec<Rc<Upvalue>>,
+    pub function: ObjId,
+    pub upvalues: Vec<ObjId>,
 }
 
 impl Closure {
-    pub fn new(function: impl Into<Rc<ObjFunction>>) -> Self {
-        let function = function.into();
-        let upvalues = Vec::with_capacity(function.upvalue_count);
+    pub fn new(function: ObjId, upvalue_count: usize) -> Self {
+        let upvalues = Vec::with_capacity(upvalue_count);
         Self { function, upvalues }
     }
 }
@@ -122,26 +100,5 @@ impl ObjFunction {
 impl Default for ObjFunction {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl PartialEq for Object {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::String {
-                    value: left,
-                    hash: left_hash,
-                },
-                Self::String {
-                    value: right,
-                    hash: right_hash,
-                },
-            ) => left == right && left_hash == right_hash,
-            // Closures compare by identity, never by their bytecode or constants.
-            (Self::Closure(_), Self::Closure(_)) => std::ptr::eq(self, other),
-            (Self::NativeFunction(_), Self::NativeFunction(_)) => std::ptr::eq(self, other),
-            _ => false,
-        }
     }
 }
