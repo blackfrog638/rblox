@@ -1,3 +1,17 @@
+#[cfg(feature = "debug-gc")]
+macro_rules! gc_log {
+    ($($argument:tt)*) => {
+        eprintln!("[GC] {}", format_args!($($argument)*));
+    };
+}
+
+#[cfg(not(feature = "debug-gc"))]
+macro_rules! gc_log {
+    ($($argument:tt)*) => {};
+}
+
+pub(crate) use gc_log;
+
 pub mod chunk;
 pub mod compiler;
 pub mod memory;

@@ -12,3 +12,7 @@ name = "rblox-vm"
 path = "src/main.rs"
 
 [dependencies]
+
+[features]
+default = []
+debug-gc = []

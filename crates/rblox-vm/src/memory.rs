@@ -33,6 +33,18 @@ impl Heap {
             heap: self.id,
             index: self.objects.len(),
         };
+        crate::gc_log!(
+            "allocate {:?} ({}) - {} objects",
+            id,
+            match &object {
+                Object::String { .. } => "string",
+                Object::Function(_) => "function",
+                Object::Closure(_) => "closure",
+                Object::NativeFunction(_) => "native function",
+                Object::Upvalue(_) => "upvalue",
+            },
+            self.objects.len() + 1,
+        );
         self.objects.push(object);
         id
     }
