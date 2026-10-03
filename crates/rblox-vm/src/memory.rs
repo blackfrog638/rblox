@@ -107,6 +107,41 @@ impl Heap {
         }
     }
 
+    #[allow(dead_code)] // Called after root marking when collection is wired in.
+    pub(crate) fn trace_references(&mut self) {
+        while let Some(id) = self.gray_stack.pop() {
+            crate::gc_log!("trace {:?} ({:?})", id, self.get(id));
+            let references = match self.get(id) {
+                Object::String { .. } | Object::NativeFunction(_) => Vec::new(),
+                Object::Function(function) => function
+                    .chunk
+                    .constants
+                    .iter()
+                    .filter_map(|value| match value {
+                        Value::Obj(id) => Some(*id),
+                        Value::Number(_) | Value::Bool(_) | Value::Nil => None,
+                    })
+                    .collect(),
+                Object::Closure(closure) => std::iter::once(closure.function)
+                    .chain(closure.upvalues.iter().copied())
+                    .collect(),
+                Object::Upvalue(upvalue) => upvalue
+                    .closed
+                    .iter()
+                    .filter_map(|value| match value {
+                        Value::Obj(id) => Some(*id),
+                        Value::Number(_) | Value::Bool(_) | Value::Nil => None,
+                    })
+                    .chain(upvalue.next)
+                    .collect(),
+            };
+
+            for reference in references {
+                self.mark_object(reference);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn is_marked(&self, id: ObjId) -> bool {
         assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
@@ -117,5 +152,80 @@ impl Heap {
 impl Default for Heap {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object::{Closure, ObjFunction, Upvalue};
+
+    #[test]
+    fn traces_function_closure_and_upvalue_references() {
+        let mut heap = Heap::new();
+        let Value::Obj(literal) = heap.alloc_string("literal".to_string()) else {
+            unreachable!()
+        };
+        let Value::Obj(orphan) = heap.alloc_string("orphan".to_string()) else {
+            unreachable!()
+        };
+
+        let next_upvalue = heap.alloc(Object::Upvalue(Upvalue {
+            location: 0,
+            closed: None,
+            next: None,
+        }));
+        let upvalue = heap.alloc(Object::Upvalue(Upvalue {
+            location: 1,
+            closed: Some(Value::Obj(literal)),
+            next: Some(next_upvalue),
+        }));
+        let mut function = ObjFunction::new();
+        function.chunk.add_constant(Value::Obj(literal));
+        function.chunk.add_constant(Value::Number(42.0));
+        let function = heap.alloc(Object::Function(function));
+        let closure = heap.alloc(Object::Closure(Closure {
+            function,
+            upvalues: vec![upvalue],
+        }));
+
+        heap.mark_roots([Value::Obj(closure)]);
+        heap.trace_references();
+
+        for reachable in [literal, next_upvalue, upvalue, function, closure] {
+            assert!(
+                heap.is_marked(reachable),
+                "expected {reachable:?} to be marked"
+            );
+        }
+        assert!(!heap.is_marked(orphan));
+        assert!(heap.gray_stack.is_empty());
+    }
+
+    #[test]
+    fn tracing_cyclic_references_marks_each_object_once() {
+        let mut heap = Heap::new();
+        let function = heap.alloc(Object::Function(ObjFunction::new()));
+        let closure = heap.alloc(Object::Closure(Closure {
+            function,
+            upvalues: Vec::new(),
+        }));
+        let upvalue = heap.alloc(Object::Upvalue(Upvalue {
+            location: 0,
+            closed: Some(Value::Obj(closure)),
+            next: None,
+        }));
+        let Object::Closure(closure_object) = heap.get_mut(closure) else {
+            unreachable!()
+        };
+        closure_object.upvalues.push(upvalue);
+
+        heap.mark_roots([Value::Obj(closure)]);
+        heap.trace_references();
+
+        assert!(heap.is_marked(function));
+        assert!(heap.is_marked(closure));
+        assert!(heap.is_marked(upvalue));
+        assert!(heap.gray_stack.is_empty());
     }
 }
