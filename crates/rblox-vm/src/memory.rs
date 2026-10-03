@@ -18,6 +18,8 @@ pub struct ObjId {
 pub struct Heap {
     id: usize,
     objects: Vec<Object>,
+    marked: Vec<bool>,
+    gray_stack: Vec<ObjId>,
 }
 
 impl Heap {
@@ -25,6 +27,8 @@ impl Heap {
         Self {
             id: NEXT_HEAP_ID.fetch_add(1, Ordering::Relaxed),
             objects: Vec::new(),
+            marked: Vec::new(),
+            gray_stack: Vec::new(),
         }
     }
 
@@ -46,6 +50,7 @@ impl Heap {
             self.objects.len() + 1,
         );
         self.objects.push(object);
+        self.marked.push(false);
         id
     }
 
@@ -70,6 +75,42 @@ impl Heap {
 
     pub fn is_empty(&self) -> bool {
         self.objects.is_empty()
+    }
+
+    pub(crate) fn mark_roots(&mut self, roots: impl IntoIterator<Item = Value>) {
+        self.marked.fill(false);
+        self.gray_stack.clear();
+
+        let roots: Vec<_> = roots.into_iter().collect();
+        crate::gc_log!("marking {} roots", roots.len());
+        for root in roots {
+            self.mark_value(root);
+        }
+    }
+
+    fn mark_value(&mut self, value: Value) {
+        if let Value::Obj(id) = value {
+            self.mark_object(id);
+        }
+    }
+
+    fn mark_object(&mut self, id: ObjId) {
+        assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
+        let marked = self
+            .marked
+            .get_mut(id.index)
+            .expect("Object handle points outside its heap.");
+        if !*marked {
+            *marked = true;
+            self.gray_stack.push(id);
+            crate::gc_log!("mark {:?}", id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_marked(&self, id: ObjId) -> bool {
+        assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
+        self.marked[id.index]
     }
 }
 

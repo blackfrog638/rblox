@@ -677,11 +677,82 @@ impl VM {
         let function = self.heap.alloc(Object::NativeFunction(function));
         self.globals.set(name, Value::Obj(function), &self.heap);
     }
+
+    #[allow(dead_code)] // Invoked by the collector once it has a collection trigger.
+    fn mark_roots(&mut self) {
+        let mut roots = self.stack.clone();
+        roots.extend(
+            self.call_stack
+                .iter()
+                .map(|frame| Value::Obj(frame.function)),
+        );
+
+        let mut open_upvalue = self.open_upvalues;
+        while let Some(id) = open_upvalue {
+            roots.push(Value::Obj(id));
+            open_upvalue = self.upvalue(id).next;
+        }
+
+        roots.extend(self.globals.gc_roots());
+        self.heap.mark_roots(roots);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marking_roots_covers_vm_state_and_live_global_entries() {
+        let mut vm = VM::new();
+        let Value::Obj(stack_root) = vm.heap.alloc_string("stack".to_string()) else {
+            unreachable!()
+        };
+        let frame_root = vm.heap.alloc(Object::NativeFunction(VM::clock_native));
+        let upvalue_tail = vm.heap.alloc(Object::Upvalue(Upvalue {
+            location: 0,
+            closed: None,
+            next: None,
+        }));
+        let upvalue_head = vm.heap.alloc(Object::Upvalue(Upvalue {
+            location: 1,
+            closed: None,
+            next: Some(upvalue_tail),
+        }));
+        let Value::Obj(global_key) = vm.heap.alloc_string("global".to_string()) else {
+            unreachable!()
+        };
+        let Value::Obj(global_value) = vm.heap.alloc_string("value".to_string()) else {
+            unreachable!()
+        };
+        let Value::Obj(orphan) = vm.heap.alloc_string("orphan".to_string()) else {
+            unreachable!()
+        };
+
+        vm.stack.push(Value::Obj(stack_root));
+        vm.call_stack.push(CallFrame {
+            function: frame_root,
+            ip: 0,
+            stack_start: 0,
+        });
+        vm.open_upvalues = Some(upvalue_head);
+        vm.globals
+            .set(global_key, Value::Obj(global_value), &vm.heap);
+
+        vm.mark_roots();
+
+        for root in [
+            stack_root,
+            frame_root,
+            upvalue_head,
+            upvalue_tail,
+            global_key,
+            global_value,
+        ] {
+            assert!(vm.heap.is_marked(root), "expected {root:?} to be marked");
+        }
+        assert!(!vm.heap.is_marked(orphan));
+    }
 
     #[test]
     fn run_executes_arithmetic_program() {

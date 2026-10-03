@@ -36,6 +36,17 @@ impl Table {
         self.active_count == 0
     }
 
+    pub(crate) fn gc_roots(&self) -> impl Iterator<Item = Value> + '_ {
+        self.entries.iter().flat_map(|entry| {
+            match (entry.key, entry.value) {
+                (Some(key), Some(value)) => Some([Value::Obj(key), value]),
+                _ => None,
+            }
+            .into_iter()
+            .flatten()
+        })
+    }
+
     pub fn capacity(&self) -> usize {
         self.entries.len()
     }
