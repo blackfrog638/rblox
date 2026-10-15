@@ -8,6 +8,8 @@ const MAX_LOAD: usize = 75;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
+    // Empty: (None, None); tombstone: (None, Some(Nil)); live: (Some, Some).
+    // A tombstone must not retain a handle to a potentially collected string.
     pub key: Option<ObjId>,
     pub value: Option<Value>,
 }
@@ -51,6 +53,18 @@ impl Table {
         self.entries.len()
     }
 
+    pub(crate) fn remove_white(&mut self, heap: &Heap) {
+        for entry in &mut self.entries {
+            if let Some(key) = entry.key
+                && !heap.is_marked(key)
+            {
+                entry.key = None;
+                entry.value = Some(Value::Nil);
+                self.active_count -= 1;
+            }
+        }
+    }
+
     pub fn get(&self, key: &ObjId, heap: &Heap) -> Option<&Value> {
         if self.entries.is_empty() {
             return None;
@@ -70,7 +84,8 @@ impl Table {
         loop {
             let entry = &self.entries[index];
             match &entry.key {
-                None => return None,
+                None if entry.value.is_none() => return None,
+                None => {}
                 Some(key)
                     if entry.value.is_some()
                         && heap.get(*key).string_hash() == Some(hash)
@@ -94,12 +109,17 @@ impl Table {
             "Table keys must be strings."
         );
         if (self.count + 1) * 100 > self.capacity().max(1) * MAX_LOAD {
-            self.adjust_capacity(self.capacity().max(INITIAL_CAPACITY) * 2, heap);
+            let capacity = if (self.active_count + 1) * 100 > self.capacity() * MAX_LOAD {
+                self.capacity().max(INITIAL_CAPACITY) * 2
+            } else {
+                self.capacity()
+            };
+            self.adjust_capacity(capacity, heap);
         }
 
         let index = self.find_insert_index(&key, heap);
-        let is_new_key = self.entries[index].value.is_none();
-        if self.entries[index].key.is_none() {
+        let is_new_key = self.entries[index].key.is_none();
+        if self.entries[index].key.is_none() && self.entries[index].value.is_none() {
             self.count += 1;
         }
         if is_new_key {
@@ -117,7 +137,10 @@ impl Table {
             return false;
         };
 
-        self.entries[index].value = None;
+        self.entries[index] = Entry {
+            key: None,
+            value: Some(Value::Nil),
+        };
         self.active_count -= 1;
         true
     }
@@ -139,8 +162,8 @@ impl Table {
         loop {
             let entry = &self.entries[index];
             match &entry.key {
-                None => return None,
-                Some(_) if entry.value.is_none() => {}
+                None if entry.value.is_none() => return None,
+                None => {}
                 Some(entry_key) if heap.get(*entry_key).string_value() == value => {
                     return Some(index);
                 }
@@ -160,8 +183,8 @@ impl Table {
         loop {
             let entry = &self.entries[index];
             match &entry.key {
-                None => return tombstone.unwrap_or(index),
-                Some(_) if entry.value.is_none() => {
+                None if entry.value.is_none() => return tombstone.unwrap_or(index),
+                None => {
                     tombstone.get_or_insert(index);
                 }
                 Some(entry_key) if heap.get(*entry_key).string_value() == value => {

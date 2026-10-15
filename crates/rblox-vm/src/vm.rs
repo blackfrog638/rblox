@@ -73,7 +73,14 @@ impl VM {
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), String> {
-        let function = compile(source, &mut self.heap)?;
+        let function = match compile(source, &mut self.heap) {
+            Ok(function) => function,
+            Err(error) => {
+                // No builder can still reference the failed compilation's objects.
+                self.collect_garbage();
+                return Err(error);
+            }
+        };
         self.interpret_function(function)
     }
 
@@ -100,11 +107,18 @@ impl VM {
         if result.is_err() {
             self.reset_stack();
         }
+        // Also reclaim completed scripts in REPL sessions and on runtime errors.
+        self.collect_garbage();
         result
     }
 
     pub fn run(&mut self) -> Result<(), String> {
         loop {
+            // A safe point: the previous instruction has published its results
+            // to the VM stack/objects. Rust-local builders are not GC roots.
+            if self.heap.should_collect() {
+                self.collect_garbage();
+            }
             if self.trace_execution && self.current_ip()? < self.current_chunk()?.code.len() {
                 self.trace_current_state();
             }
@@ -678,7 +692,22 @@ impl VM {
         self.globals.set(name, Value::Obj(function), &self.heap);
     }
 
-    #[allow(dead_code)] // Invoked by the collector once it has a collection trigger.
+    pub fn collect_garbage(&mut self) {
+        crate::gc_log!(
+            "begin: {} objects, {} managed bytes",
+            self.heap.len(),
+            self.heap.bytes_allocated()
+        );
+        self.mark_roots();
+        self.heap.trace_references();
+        self.heap.finish_collection();
+        crate::gc_log!(
+            "end: {} objects, {} managed bytes",
+            self.heap.len(),
+            self.heap.bytes_allocated()
+        );
+    }
+
     fn mark_roots(&mut self) {
         let mut roots = self.stack.clone();
         roots.extend(
@@ -701,6 +730,23 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_collection_runs_inside_a_long_running_script() {
+        fn heap_size(vm: &mut VM, _: &[Value]) -> Result<Value, String> {
+            Ok(Value::Number(vm.heap.len() as f64))
+        }
+        let mut vm = VM::new();
+        vm.define_native_function("heapSize", heap_size);
+        vm.interpret(
+            r#"
+            var text = "";
+            for (var i = 0; i < 2500; i = i + 1) text = text + "x";
+            if (heapSize() > 1500) nil();
+        "#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn marking_roots_covers_vm_state_and_live_global_entries() {

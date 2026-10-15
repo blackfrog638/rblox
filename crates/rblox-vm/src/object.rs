@@ -12,6 +12,25 @@ pub enum Object {
 }
 
 impl Object {
+    pub(crate) fn managed_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + match self {
+                Self::String { value, .. } => value.capacity(),
+                Self::Function(function) => {
+                    function.chunk.code.capacity()
+                        + function.chunk.constants.capacity() * std::mem::size_of::<Value>()
+                        + function.chunk.lines.capacity()
+                            * std::mem::size_of::<crate::chunk::LineRun>()
+                        + function.name.as_ref().map_or(0, String::capacity)
+                        + function.upvalues.capacity() * std::mem::size_of::<UpvalueDesc>()
+                }
+                Self::Closure(closure) => {
+                    closure.upvalues.capacity() * std::mem::size_of::<ObjId>()
+                }
+                Self::NativeFunction(_) | Self::Upvalue(_) => 0,
+            }
+    }
+
     pub fn string_hash(&self) -> Option<u32> {
         match self {
             Object::String { hash, .. } => Some(*hash),

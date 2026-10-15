@@ -1,25 +1,39 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::object::{Object, hash_string};
+use crate::table::Table;
 use crate::value::Value;
 
 static NEXT_HEAP_ID: AtomicUsize = AtomicUsize::new(0);
+const INITIAL_GC_THRESHOLD: usize = 1024 * 1024;
 
 /// A non-owning reference into one Heap. Copying it does not keep an object alive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ObjId {
     heap: usize,
     index: usize,
+    generation: u64,
 }
 
-/// Owns all Lox objects. Slots are append-only until garbage collection is added.
-/// Rust still allocates and releases the Vec and each object's String/Vec fields.
+#[derive(Debug)]
+struct Slot {
+    object: Option<Object>,
+    generation: u64,
+    marked: bool,
+}
+
+/// Owns all Lox objects in stable, reusable slots. Rust drops an unreachable
+/// object's String/Vec buffers; the collector decides *when* to drop it.
 #[derive(Debug)]
 pub struct Heap {
     id: usize,
-    objects: Vec<Object>,
-    marked: Vec<bool>,
+    objects: Vec<Slot>,
+    free_slots: Vec<usize>,
     gray_stack: Vec<ObjId>,
+
+    strings: Table,
+    bytes_allocated: usize,
+    next_gc: usize,
 }
 
 impl Heap {
@@ -27,15 +41,27 @@ impl Heap {
         Self {
             id: NEXT_HEAP_ID.fetch_add(1, Ordering::Relaxed),
             objects: Vec::new(),
-            marked: Vec::new(),
+            free_slots: Vec::new(),
             gray_stack: Vec::new(),
+            strings: Table::new(),
+            bytes_allocated: 0,
+            next_gc: INITIAL_GC_THRESHOLD,
         }
     }
 
     pub fn alloc(&mut self, object: Object) -> ObjId {
+        let index = self.free_slots.pop().unwrap_or_else(|| {
+            self.objects.push(Slot {
+                object: None,
+                generation: 0,
+                marked: false,
+            });
+            self.objects.len() - 1
+        });
         let id = ObjId {
             heap: self.id,
-            index: self.objects.len(),
+            index,
+            generation: self.objects[index].generation,
         };
         crate::gc_log!(
             "allocate {:?} ({}) - {} objects",
@@ -47,38 +73,83 @@ impl Heap {
                 Object::NativeFunction(_) => "native function",
                 Object::Upvalue(_) => "upvalue",
             },
-            self.objects.len() + 1,
+            self.len(),
         );
-        self.objects.push(object);
-        self.marked.push(false);
+        self.bytes_allocated = self.bytes_allocated.saturating_add(object.managed_size());
+        self.objects[index].object = Some(object);
         id
     }
 
     pub fn alloc_string(&mut self, value: String) -> Value {
         let hash = hash_string(&value);
-        Value::Obj(self.alloc(Object::String { value, hash }))
+        if let Some(id) = self.strings.find_string(&value, hash, self) {
+            return Value::Obj(id);
+        }
+        let id = self.alloc(Object::String { value, hash });
+        let mut strings = std::mem::take(&mut self.strings);
+        strings.set(id, Value::Nil, self);
+        self.strings = strings;
+        Value::Obj(id)
     }
 
     pub fn get(&self, id: ObjId) -> &Object {
-        assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
-        &self.objects[id.index]
+        self.slot(id)
+            .object
+            .as_ref()
+            .expect("Object was collected.")
     }
 
     pub fn get_mut(&mut self, id: ObjId) -> &mut Object {
+        self.slot(id);
+        self.objects[id.index]
+            .object
+            .as_mut()
+            .expect("Object was collected.")
+    }
+
+    fn slot(&self, id: ObjId) -> &Slot {
         assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
-        &mut self.objects[id.index]
+        let slot = self
+            .objects
+            .get(id.index)
+            .expect("Object handle points outside its heap.");
+        assert_eq!(slot.generation, id.generation, "Object was collected.");
+        assert!(slot.object.is_some(), "Object was collected.");
+        slot
     }
 
     pub fn len(&self) -> usize {
-        self.objects.len()
+        self.objects.len() - self.free_slots.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
+        self.len() == 0
+    }
+
+    /// Estimated managed object bytes, including owned buffers. This excludes
+    /// allocator overhead and collector/table capacity, and is not process RSS.
+    /// Mutations through `get_mut` are reconciled at the next collection.
+    pub fn bytes_allocated(&self) -> usize {
+        self.bytes_allocated
+    }
+
+    pub(crate) fn should_collect(&self) -> bool {
+        cfg!(feature = "stress-gc") || self.bytes_allocated > self.next_gc
+    }
+
+    pub(crate) fn finish_collection(&mut self) {
+        // Weak entries must disappear BEFORE their target slots are freed.
+        let mut strings = std::mem::take(&mut self.strings);
+        strings.remove_white(self);
+        self.strings = strings;
+        self.sweep();
+        self.next_gc = self
+            .bytes_allocated
+            .saturating_mul(2)
+            .max(INITIAL_GC_THRESHOLD);
     }
 
     pub(crate) fn mark_roots(&mut self, roots: impl IntoIterator<Item = Value>) {
-        self.marked.fill(false);
         self.gray_stack.clear();
 
         let roots: Vec<_> = roots.into_iter().collect();
@@ -95,19 +166,39 @@ impl Heap {
     }
 
     fn mark_object(&mut self, id: ObjId) {
-        assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
-        let marked = self
-            .marked
-            .get_mut(id.index)
-            .expect("Object handle points outside its heap.");
-        if !*marked {
-            *marked = true;
+        self.slot(id);
+        if !self.objects[id.index].marked {
+            self.objects[id.index].marked = true;
             self.gray_stack.push(id);
             crate::gc_log!("mark {:?}", id);
         }
     }
 
-    #[allow(dead_code)] // Called after root marking when collection is wired in.
+    fn sweep(&mut self) {
+        self.bytes_allocated = 0;
+        for (index, slot) in self.objects.iter_mut().enumerate() {
+            let Some(object) = &slot.object else { continue };
+            if slot.marked {
+                slot.marked = false;
+                self.bytes_allocated = self.bytes_allocated.saturating_add(object.managed_size());
+            } else {
+                crate::gc_log!(
+                    "free slot {} generation {} ({:?})",
+                    index,
+                    slot.generation,
+                    object
+                );
+                // Never remove/swap_remove: every ObjId must retain its index.
+                slot.object = None;
+                slot.generation = slot
+                    .generation
+                    .checked_add(1)
+                    .expect("Object generation overflow.");
+                self.free_slots.push(index);
+            }
+        }
+    }
+
     pub(crate) fn trace_references(&mut self) {
         while let Some(id) = self.gray_stack.pop() {
             crate::gc_log!("trace {:?} ({:?})", id, self.get(id));
@@ -142,10 +233,8 @@ impl Heap {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn is_marked(&self, id: ObjId) -> bool {
-        assert_eq!(id.heap, self.id, "Object belongs to a different heap.");
-        self.marked[id.index]
+        self.slot(id).marked
     }
 }
 
@@ -159,6 +248,98 @@ impl Default for Heap {
 mod tests {
     use super::*;
     use crate::object::{Closure, ObjFunction, Upvalue};
+
+    #[test]
+    fn sweeping_does_not_move_surviving_objects() {
+        let mut heap = Heap::new();
+        heap.alloc_string("garbage before survivor".into());
+        let survivor = heap.alloc_string("survivor".into());
+        heap.mark_roots([survivor]);
+        heap.trace_references();
+        heap.finish_collection();
+
+        assert_eq!(survivor.as_string(&heap).unwrap(), "survivor");
+        assert_eq!(heap.len(), 1);
+    }
+
+    #[test]
+    fn equal_strings_share_an_interned_object() {
+        let mut heap = Heap::new();
+        let first = heap.alloc_string("same".into());
+        let second = heap.alloc_string(["sa", "me"].concat());
+        assert_eq!(first, second);
+        assert_eq!(heap.len(), 1);
+    }
+
+    #[test]
+    fn weak_strings_are_removed_before_reusing_slots_and_probe_chains_survive() {
+        let mut heap = Heap::new();
+        // Three keys in one bucket force lookup past a deleted weak key.
+        let names: Vec<_> = (0..1000)
+            .map(|i| format!("collision-{i}"))
+            .filter(|s| hash_string(s).is_multiple_of(16))
+            .take(3)
+            .collect();
+        let dead = heap.alloc_string(names[0].clone());
+        let live = heap.alloc_string(names[1].clone());
+        heap.alloc_string(names[2].clone());
+        heap.mark_roots([live]);
+        heap.trace_references();
+        heap.finish_collection();
+
+        assert_eq!(heap.len(), 1);
+        assert_eq!(heap.strings.len(), 1);
+        assert_eq!(heap.alloc_string(names[1].clone()), live);
+        let recreated = heap.alloc_string(names[0].clone());
+        assert_ne!(recreated, dead);
+        assert_eq!(recreated.as_string(&heap).unwrap(), &names[0]);
+        assert_eq!(heap.alloc_string(names[0].clone()), recreated);
+    }
+
+    #[test]
+    #[should_panic(expected = "Object was collected.")]
+    fn old_handles_cannot_alias_reused_slots() {
+        let mut heap = Heap::new();
+        let old = heap.alloc_string("old".into());
+        heap.mark_roots([]);
+        heap.trace_references();
+        heap.finish_collection();
+        heap.alloc_string("new".into());
+        old.as_string(&heap);
+    }
+
+    #[test]
+    fn repeated_collections_reset_marks_and_reuse_slots() {
+        let mut heap = Heap::new();
+        let live = heap.alloc_string("kept".into());
+        for index in 0..100 {
+            heap.alloc_string(format!("temporary-{index}"));
+            heap.mark_roots([live]);
+            heap.trace_references();
+            heap.finish_collection();
+            assert_eq!(heap.len(), 1);
+            assert_eq!(heap.objects.len(), 2);
+            assert_eq!(heap.strings.len(), 1);
+            assert_eq!(live.as_string(&heap).unwrap(), "kept");
+        }
+        heap.mark_roots([]);
+        heap.trace_references();
+        heap.finish_collection();
+        assert!(heap.is_empty());
+        assert_eq!(heap.bytes_allocated(), 0);
+    }
+
+    #[test]
+    fn weak_string_cache_reuses_tombstones_without_growing_forever() {
+        let mut heap = Heap::new();
+        for index in 0..1000 {
+            heap.alloc_string(format!("temporary-{index}"));
+            heap.mark_roots([]);
+            heap.trace_references();
+            heap.finish_collection();
+        }
+        assert_eq!(heap.strings.capacity(), 16);
+    }
 
     #[test]
     fn traces_function_closure_and_upvalue_references() {

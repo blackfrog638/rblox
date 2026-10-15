@@ -16,3 +16,4 @@ path = "src/main.rs"
 [features]
 default = []
 debug-gc = []
+stress-gc = []

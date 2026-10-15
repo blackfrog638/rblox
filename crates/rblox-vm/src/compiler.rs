@@ -13,6 +13,8 @@ use crate::value::Value;
 /// Compile into the same heap that will execute the resulting function/chunk.
 /// The returned function is a builder value; nested prototypes and strings are
 /// already heap objects. The VM allocates the script prototype before running.
+/// Compilation does not collect. Install the returned builder with
+/// `VM::interpret_chunk` before requesting collection; Rust locals are not roots.
 ///
 /// ```
 /// use rblox_vm::{compile, VM};
