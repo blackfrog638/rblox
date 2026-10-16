@@ -29,6 +29,12 @@ pub struct Interpreter {
     locals: HashMap<usize, usize>,
 }
 
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Interpreter {
     pub fn new() -> Self {
         let environment = Rc::new(RefCell::new(Environment::new()));
@@ -234,7 +240,7 @@ impl Interpreter {
             } => {
                 let left_value = self.evaluate(left)?;
                 let right_value = self.evaluate(right)?;
-                match (left_value, operator.token_type.clone(), right_value) {
+                match (left_value, operator.token_type, right_value) {
                     (Value::Number(n1), TokenType::Minus, Value::Number(n2)) => {
                         Ok(Value::Number(n1 - n2))
                     }

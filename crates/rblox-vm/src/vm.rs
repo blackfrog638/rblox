@@ -44,6 +44,12 @@ pub struct VM {
     start_time: Instant,
 }
 
+impl Default for VM {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VM {
     pub fn new() -> Self {
         let mut vm = Self {

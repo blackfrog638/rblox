@@ -217,7 +217,7 @@ impl Scanner {
         }
         let text: String = self.source[self.start..self.current].iter().collect();
         let token_type: TokenType = match self.keywords.get(text.as_str()) {
-            Some(token_type) => token_type.clone(),
+            Some(token_type) => *token_type,
             None => TokenType::Identifier,
         };
         self.add_token(token_type, None);

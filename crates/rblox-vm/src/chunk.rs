@@ -45,6 +45,12 @@ pub struct Chunk {
     pub lines: Vec<LineRun>,
 }
 
+impl Default for Chunk {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Chunk {
     pub fn new() -> Self {
         Self {
@@ -57,11 +63,11 @@ impl Chunk {
     pub fn write(&mut self, byte: u8, line: usize) {
         self.code.push(byte);
 
-        if let Some(last) = self.lines.last_mut() {
-            if last.line == line {
-                last.run_length += 1;
-                return;
-            }
+        if let Some(last) = self.lines.last_mut()
+            && last.line == line
+        {
+            last.run_length += 1;
+            return;
         }
 
         self.lines.push(LineRun {
@@ -339,7 +345,7 @@ mod tests {
     fn disassemble_shows_constant_and_return() {
         let heap = Heap::new();
         let mut chunk = Chunk::new();
-        let constant_index = chunk.add_constant(Value::Number(3.14));
+        let constant_index = chunk.add_constant(Value::Number(12.5));
 
         chunk.write(OP_CONSTANT, 123);
         chunk.write(constant_index, 123);
@@ -349,7 +355,7 @@ mod tests {
 
         assert!(output.contains("== test chunk =="));
         assert!(output.contains("OP_CONSTANT"));
-        assert!(output.contains("3.14"));
+        assert!(output.contains("12.5"));
         assert!(output.contains("OP_RETURN"));
     }
 

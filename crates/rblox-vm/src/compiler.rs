@@ -43,10 +43,10 @@ pub fn compile(source: &str, heap: &mut Heap) -> Result<ObjFunction, String> {
 
     let mut first_error = None;
     while !matches!(parser.peek().kind, TokenKind::Eof) {
-        if let Err(error) = parser.declaration() {
-            if first_error.is_none() {
-                first_error = Some(error);
-            }
+        if let Err(error) = parser.declaration()
+            && first_error.is_none()
+        {
+            first_error = Some(error);
         }
     }
 

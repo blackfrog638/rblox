@@ -15,10 +15,8 @@ fn main() {
             eprintln!("{err}");
             process::exit(65);
         }
-    } else {
-        if let Err(err) = app.run_prompt() {
-            eprintln!("{err}");
-            process::exit(66);
-        }
+    } else if let Err(err) = app.run_prompt() {
+        eprintln!("{err}");
+        process::exit(66);
     }
 }

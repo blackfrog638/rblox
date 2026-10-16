@@ -95,13 +95,12 @@ impl<'a> Resolver<'a> {
                     if let Expr::Variable {
                         name: superclass_name,
                     } = superclass_expr
+                        && name.lexeme == superclass_name.lexeme
                     {
-                        if name.lexeme == superclass_name.lexeme {
-                            return Err(ResolveError::new(
-                                superclass_name,
-                                "A class can't inherit from itself.",
-                            ));
-                        }
+                        return Err(ResolveError::new(
+                            superclass_name,
+                            "A class can't inherit from itself.",
+                        ));
                     }
                     self.current_class = ClassType::Subclass;
                     self.resolve_expr(superclass_expr)?;
@@ -199,13 +198,13 @@ impl<'a> Resolver<'a> {
     fn resolve_expr(&mut self, expr: &Expr) -> Result<(), ResolveError> {
         match expr {
             Expr::Variable { name } => {
-                if let Some(scope) = self.scopes.last() {
-                    if matches!(scope.get(&name.lexeme), Some(false)) {
-                        return Err(ResolveError::new(
-                            name,
-                            "Can't read local variable in its own initializer.",
-                        ));
-                    }
+                if let Some(scope) = self.scopes.last()
+                    && matches!(scope.get(&name.lexeme), Some(false))
+                {
+                    return Err(ResolveError::new(
+                        name,
+                        "Can't read local variable in its own initializer.",
+                    ));
                 }
                 self.resolve_local(expr, name);
             }

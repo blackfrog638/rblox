@@ -1,4 +1,5 @@
 use crate::token::Token;
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -52,61 +53,42 @@ pub enum Expr {
     },
 }
 
-impl Expr {
-    pub fn to_string(&self) -> String {
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Binary {
                 left,
                 operator,
                 right,
-            } => {
-                format!(
-                    "({} {} {})",
-                    operator.lexeme,
-                    left.to_string(),
-                    right.to_string()
-                )
-            }
+            } => write!(f, "({} {} {})", operator.lexeme, left, right),
             Expr::Grouping { expression } => {
-                format!("(group {})", expression.to_string())
+                write!(f, "(group {})", expression)
             }
-            Expr::Literal { value } => value.to_string(),
+            Expr::Literal { value } => write!(f, "{}", value),
             Expr::Logical {
                 left,
                 operator,
                 right,
-            } => {
-                format!(
-                    "({} {} {})",
-                    operator.lexeme,
-                    left.to_string(),
-                    right.to_string()
-                )
-            }
+            } => write!(f, "({} {} {})", operator.lexeme, left, right),
             Expr::Assign { name, value } => {
-                format!("(assign {} {})", name.lexeme, value.to_string())
+                write!(f, "(assign {} {})", name.lexeme, value)
             }
             Expr::Unary { operator, right } => {
-                format!("({} {})", operator.lexeme, right.to_string())
+                write!(f, "({} {})", operator.lexeme, right)
             }
-            Expr::Variable { name } => name.lexeme.clone(),
-            Expr::This { keyword } => keyword.lexeme.clone(),
+            Expr::Variable { name } => write!(f, "{}", name.lexeme),
+            Expr::This { keyword } => write!(f, "{}", keyword.lexeme),
             Expr::Super { keyword, method } => {
-                format!("({}.{})", keyword.lexeme, method.lexeme)
+                write!(f, "({}.{})", keyword.lexeme, method.lexeme)
             }
             Expr::Get { object, name } => {
-                format!("(get {} {})", object.to_string(), name.lexeme)
+                write!(f, "(get {} {})", object, name.lexeme)
             }
             Expr::Set {
                 object,
                 name,
                 value,
-            } => format!(
-                "(set {} {} {})",
-                object.to_string(),
-                name.lexeme,
-                value.to_string()
-            ),
+            } => write!(f, "(set {} {} {})", object, name.lexeme, value),
             Expr::Call {
                 callee,
                 paren: _,
@@ -117,7 +99,7 @@ impl Expr {
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
                     .join(" ");
-                format!("(call {} {})", callee.to_string(), args)
+                write!(f, "(call {} {})", callee, args)
             }
         }
     }
