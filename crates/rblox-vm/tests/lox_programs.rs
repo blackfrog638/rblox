@@ -30,6 +30,47 @@ fn run_program(source: &str) -> Output {
 }
 
 #[test]
+fn calling_classes_creates_distinct_instances_and_preserves_the_stack() {
+    let output = run_program(
+        r#"
+        class Box {}
+        var a = Box();
+        var alias = a;
+        print a;
+        print a == alias;
+        print a == Box();
+        print a == Box;
+        fun factory() { class Local {} return Local(); }
+        fun check(first, instance, last) {
+            print first + last;
+            print instance;
+        }
+        check(10, factory(), 20);
+        "#,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Box instance\ntrue\nfalse\nfalse\n30\nLocal instance\n"
+    );
+}
+
+#[test]
+fn class_calls_reject_arguments_and_instances_are_not_callable() {
+    for (source, message) in [
+        ("class Box {} Box(1);", "Expected 0 arguments but got 1."),
+        (
+            "class Box {} Box()();",
+            "Can only call functions and classes.",
+        ),
+    ] {
+        let output = run_program(source);
+        assert_eq!(output.status.code(), Some(70), "{output:?}");
+        assert!(String::from_utf8(output.stderr).unwrap().contains(message));
+    }
+}
+
+#[test]
 fn classes_preserve_scope_identity_and_captured_locals() {
     let output = run_program(
         r#"

@@ -384,8 +384,21 @@ impl VM {
                         Object::Upvalue(_) => {
                             return Err(self.runtime_error("Can only call functions."));
                         }
-                        Object::Class { name } => {
-                            return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
+                        Object::Class { .. } => {
+                            if arg_count != 0 {
+                                return Err(self.runtime_error(&format!(
+                                    "Expected 0 arguments but got {}.",
+                                    arg_count
+                                )));
+                            }
+                            let instance = self.heap.alloc(Object::Instance {
+                                class: callee,
+                                fields: Table::new(),
+                            });
+                            self.stack[callee_index] = Value::Obj(instance);
+                        }
+                        Object::Instance { .. } => {
+                            return Err(self.runtime_error("Can only call functions and classes."));
                         }
                     }
                 }
@@ -623,6 +636,9 @@ impl VM {
             }
             Object::Class { name } => {
                 return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
+            }
+            Object::Instance { .. } => {
+                return Err(self.runtime_error("Can only call functions and classes."));
             }
         };
 

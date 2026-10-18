@@ -44,7 +44,8 @@ impl Value {
                 (Object::String { value: a, .. }, Object::String { value: b, .. }) => a == b,
                 (Object::Closure(_), Object::Closure(_))
                 | (Object::NativeFunction(_), Object::NativeFunction(_))
-                | (Object::Class { .. }, Object::Class { .. }) => left == right,
+                | (Object::Class { .. }, Object::Class { .. })
+                | (Object::Instance { .. }, Object::Instance { .. }) => left == right,
                 _ => false,
             },
             _ => self == other,
@@ -85,6 +86,10 @@ impl fmt::Display for ValueDisplay<'_> {
                 Object::NativeFunction(_) => write!(f, "<native function>"),
                 Object::Upvalue(_) => write!(f, "<upvalue>"),
                 Object::Class { name } => write!(f, "<class {}>", name),
+                Object::Instance { class, .. } => match self.heap.get(*class) {
+                    Object::Class { name } => write!(f, "{} instance", name),
+                    _ => write!(f, "<invalid instance>"),
+                },
             },
         }
     }

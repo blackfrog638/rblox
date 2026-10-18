@@ -73,6 +73,7 @@ impl Heap {
                 Object::NativeFunction(_) => "native function",
                 Object::Upvalue(_) => "upvalue",
                 Object::Class { .. } => "class",
+                Object::Instance { .. } => "instance",
             },
             self.len(),
         );
@@ -227,6 +228,14 @@ impl Heap {
                     .chain(upvalue.next)
                     .collect(),
                 Object::Class { .. } => Vec::new(),
+                Object::Instance { class, fields } => fields
+                    .gc_roots()
+                    .filter_map(|value| match value {
+                        Value::Obj(id) => Some(id),
+                        Value::Number(_) | Value::Bool(_) | Value::Nil => None,
+                    })
+                    .chain(std::iter::once(*class))
+                    .collect(),
             };
 
             for reference in references {
@@ -250,6 +259,40 @@ impl Default for Heap {
 mod tests {
     use super::*;
     use crate::object::{Closure, ObjFunction, Upvalue};
+
+    #[test]
+    fn instances_keep_their_class_field_keys_and_values_alive() {
+        let mut heap = Heap::new();
+        let class = heap.alloc(Object::Class { name: "Box".into() });
+        let Value::Obj(key) = heap.alloc_string("item".into()) else {
+            unreachable!()
+        };
+        let value = heap.alloc_string("contents".into());
+        let mut fields = Table::new();
+        fields.set(key, value, &heap);
+        let instance = heap.alloc(Object::Instance { class, fields });
+
+        heap.mark_roots([Value::Obj(instance)]);
+        heap.trace_references();
+        heap.finish_collection();
+
+        assert_eq!(heap.len(), 4);
+        assert_eq!(
+            Value::Obj(instance).display(&heap).to_string(),
+            "Box instance"
+        );
+        assert_eq!(heap.alloc_string("item".into()), Value::Obj(key));
+        let Object::Instance { fields, .. } = heap.get(instance) else {
+            unreachable!()
+        };
+        assert_eq!(fields.get(&key, &heap), Some(&value));
+        assert_eq!(value.as_string(&heap).unwrap(), "contents");
+
+        heap.mark_roots([]);
+        heap.trace_references();
+        heap.finish_collection();
+        assert!(heap.is_empty());
+    }
 
     #[test]
     fn sweeping_does_not_move_surviving_objects() {

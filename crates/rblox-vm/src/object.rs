@@ -1,3 +1,4 @@
+use crate::Table;
 use crate::{chunk::Chunk, memory::ObjId, value::Value};
 
 pub type NativeFn = fn(&mut crate::vm::VM, &[Value]) -> Result<Value, String>;
@@ -10,6 +11,7 @@ pub enum Object {
     NativeFunction(NativeFn),
     Upvalue(Upvalue),
     Class { name: String },
+    Instance { class: ObjId, fields: Table },
 }
 
 impl Object {
@@ -30,6 +32,9 @@ impl Object {
                 }
                 Self::Class { name } => name.capacity(),
                 Self::NativeFunction(_) | Self::Upvalue(_) => 0,
+                Self::Instance { fields, .. } => {
+                    fields.capacity() * std::mem::size_of::<crate::table::Entry>()
+                }
             }
     }
 
@@ -40,6 +45,7 @@ impl Object {
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
             Object::Class { .. } => None,
+            Object::Instance { .. } => None,
         }
     }
 
@@ -50,6 +56,7 @@ impl Object {
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
             Object::Class { .. } => None,
+            Object::Instance { .. } => None,
         }
     }
 }

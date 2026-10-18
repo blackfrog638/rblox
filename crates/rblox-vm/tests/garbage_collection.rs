@@ -1,6 +1,21 @@
 use rblox_vm::{Heap, VM, compile};
 
 #[test]
+fn escaped_instances_keep_local_classes_alive_until_released() {
+    let mut vm = VM::new();
+    let baseline = vm.heap().len();
+    vm.interpret("var saved; { class Local {} saved = Local(); }")
+        .unwrap();
+    vm.collect_garbage();
+    vm.interpret("print saved; if (saved != saved) nil();")
+        .unwrap();
+    vm.interpret("saved = nil;").unwrap();
+    vm.collect_garbage();
+    // The global name remains; the instance and its local class are gone.
+    assert_eq!(vm.heap().len(), baseline + 1);
+}
+
+#[test]
 fn temporary_scripts_and_strings_do_not_accumulate_between_interpretations() {
     let mut vm = VM::new();
     let baseline = vm.heap().len();
