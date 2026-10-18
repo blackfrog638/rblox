@@ -83,6 +83,7 @@ impl fmt::Display for ValueDisplay<'_> {
                 },
                 Object::NativeFunction(_) => write!(f, "<native function>"),
                 Object::Upvalue(_) => write!(f, "<upvalue>"),
+                Object::Class { name } => write!(f, "<class {}>", name),
             },
         }
     }

@@ -9,6 +9,7 @@ pub enum Object {
     Closure(Closure),
     NativeFunction(NativeFn),
     Upvalue(Upvalue),
+    Class { name: String },
 }
 
 impl Object {
@@ -27,6 +28,7 @@ impl Object {
                 Self::Closure(closure) => {
                     closure.upvalues.capacity() * std::mem::size_of::<ObjId>()
                 }
+                Self::Class { name } => name.capacity(),
                 Self::NativeFunction(_) | Self::Upvalue(_) => 0,
             }
     }
@@ -37,6 +39,7 @@ impl Object {
             Object::Function(_) | Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
+            Object::Class { .. } => None,
         }
     }
 
@@ -46,6 +49,7 @@ impl Object {
             Object::Function(_) | Object::Closure(_) => None,
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
+            Object::Class { .. } => None,
         }
     }
 }

@@ -225,6 +225,7 @@ impl Heap {
                     })
                     .chain(upvalue.next)
                     .collect(),
+                Object::Class { .. } => Vec::new(),
             };
 
             for reference in references {

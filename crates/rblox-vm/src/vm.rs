@@ -377,6 +377,9 @@ impl VM {
                         Object::Upvalue(_) => {
                             return Err(self.runtime_error("Can only call functions."));
                         }
+                        Object::Class { name } => {
+                            return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
+                        }
                     }
                 }
                 OP_CLOSE_UPVALUE => {
@@ -610,6 +613,9 @@ impl VM {
             }
             Object::Upvalue(_) => {
                 return Err(self.runtime_error("Can only call functions."));
+            }
+            Object::Class { name } => {
+                return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
             }
         };
 
