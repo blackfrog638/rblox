@@ -1,8 +1,9 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
-    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER,
-    OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP,
-    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_UPVALUE,
+    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL,
+    OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY,
+    OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use crate::memory::Heap;
 
@@ -93,6 +94,7 @@ enum PrefixRule {
 
 enum InfixRule {
     Binary,
+    Dot,
     Call,
 }
 
@@ -197,6 +199,11 @@ fn get_rule(kind: TokenKind) -> ParseRule {
             prefix: Some(PrefixRule::Identifier),
             infix: None,
             precedence: Precedence::None,
+        },
+        TokenKind::Dot => ParseRule {
+            prefix: None,
+            infix: Some(InfixRule::Dot),
+            precedence: Precedence::Call,
         },
         _ => ParseRule {
             prefix: None,
@@ -846,6 +853,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             match rule.infix.expect("infix rule must have a parser") {
                 InfixRule::Binary => self.parse_binary()?,
                 InfixRule::Call => self.parse_call()?,
+                InfixRule::Dot => self.parse_dot(can_assign)?,
             }
         }
 
@@ -854,6 +862,20 @@ impl<'a, 'h> Parser<'a, 'h> {
             return Err("Compile error: Invalid assignment target.".to_string());
         }
 
+        Ok(())
+    }
+
+    fn parse_dot(&mut self, can_assign: bool) -> Result<(), String> {
+        let name = self.consume_identifier("Expected property name after '.'.")?;
+        let name = self.heap.alloc_string(name.lexeme.to_string());
+        let constant = self.current_chunk().add_constant(name);
+        if can_assign && self.match_token(TokenKind::Equal) {
+            self.expression()?;
+            self.emit(OP_SET_PROPERTY);
+        } else {
+            self.emit(OP_GET_PROPERTY);
+        }
+        self.emit(constant);
         Ok(())
     }
 

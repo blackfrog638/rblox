@@ -1,6 +1,43 @@
 use rblox_vm::{Heap, VM, compile};
 
 #[test]
+fn dynamic_fields_keep_values_alive_and_unreachable_instance_cycles_are_collected() {
+    let mut vm = VM::new();
+    let baseline = vm.heap().len();
+    vm.interpret(
+        r#"
+        var saved;
+        {
+            class Box {}
+            saved = Box();
+            saved.child = Box();
+            saved.child.parent = saved;
+            saved.child.text = "hel" + "lo";
+            fun makeCallback() {
+                var captured = "capt" + "ured";
+                fun callback() { return captured; }
+                return callback;
+            }
+            saved.callback = makeCallback();
+        }
+    "#,
+    )
+    .unwrap();
+    vm.collect_garbage();
+    vm.interpret(
+        r#"
+        if (saved.child.parent != saved) nil();
+        if (saved.child.text != "hello") nil();
+        if (saved.callback() != "captured") nil();
+    "#,
+    )
+    .unwrap();
+    vm.interpret("saved = nil;").unwrap();
+    vm.collect_garbage();
+    assert_eq!(vm.heap().len(), baseline + 1);
+}
+
+#[test]
 fn escaped_instances_keep_local_classes_alive_until_released() {
     let mut vm = VM::new();
     let baseline = vm.heap().len();

@@ -4,10 +4,10 @@ use crate::memory::{Heap, ObjId};
 
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
-    OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE,
-    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL,
-    OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE,
-    OP_SUBTRACT, OP_TRUE, disassemble_instruction,
+    OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY,
+    OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY,
+    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
+    OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue};
@@ -216,6 +216,36 @@ impl VM {
                         .get(&name, &self.heap)
                         .copied()
                         .ok_or_else(|| self.runtime_error("Undefined variable."))?;
+                    self.push(value);
+                }
+                OP_GET_PROPERTY => {
+                    let name = self.read_constant_string()?;
+                    let receiver = self.pop()?;
+                    let Some(Object::Instance { fields, .. }) = receiver.as_obj(&self.heap) else {
+                        return Err(self.runtime_error("Only instances have properties."));
+                    };
+                    let value = fields.get(&name, &self.heap).copied().ok_or_else(|| {
+                        self.runtime_error(&format!(
+                            "Undefined property '{}'.",
+                            self.heap
+                                .get(name)
+                                .string_value()
+                                .expect("property name is a string")
+                        ))
+                    })?;
+                    self.push(value);
+                }
+                OP_SET_PROPERTY => {
+                    let name = self.read_constant_string()?;
+                    let value = self.pop()?;
+                    let receiver = self.pop()?;
+                    let Value::Obj(instance) = receiver else {
+                        return Err(self.runtime_error("Only instances have fields."));
+                    };
+                    self.heap
+                        .set_instance_field(instance, name, value)
+                        .map_err(|error| self.runtime_error(error))?;
+                    // Assignment is an expression: leave its value, not the receiver.
                     self.push(value);
                 }
                 OP_SET_GLOBAL => {

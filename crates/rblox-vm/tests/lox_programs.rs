@@ -30,6 +30,100 @@ fn run_program(source: &str) -> Output {
 }
 
 #[test]
+fn properties_support_aliases_chaining_nil_and_callable_values() {
+    let output = run_program(
+        r#"
+        class Box {}
+        var a = Box();
+        var b = Box();
+        var alias = a;
+        print a.x = b.x = 3;
+        alias.x = 7;
+        print a.x;
+        print b.x;
+        a.child = b;
+        a.child.x = 9;
+        print b.x;
+        a.empty = nil;
+        print a.empty;
+        fun twice(x) { return x * 2; }
+        a.callback = twice;
+        print a.callback(a.child.x);
+        print 1 + (a.x = 2);
+        print a.x;
+        "#,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "3\n7\n3\n9\nnil\n18\n3\n2\n"
+    );
+}
+
+#[test]
+fn property_assignment_evaluates_receiver_once_before_value() {
+    let output = run_program(
+        r#"
+        class Box {}
+        var original = Box();
+        var current = original;
+        var order = 0;
+        fun receiver() { order = order * 10 + 1; return current; }
+        fun value() { order = order * 10 + 2; current = Box(); return 42; }
+        print receiver().x = value();
+        print order;
+        print original.x;
+        print original == current;
+        "#,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "42\n12\n42\nfalse\n"
+    );
+}
+
+#[test]
+fn invalid_properties_report_compile_and_runtime_errors() {
+    for (source, code, message) in [
+        (
+            "class Box {} var a = Box(); print a.missing;",
+            70,
+            "Undefined property 'missing'.",
+        ),
+        ("print 1.foo;", 70, "Only instances have properties."),
+        ("nil.foo = 1;", 70, "Only instances have fields."),
+        (
+            "class Box {} Box.foo = 1;",
+            70,
+            "Only instances have fields.",
+        ),
+        (
+            "class Box {} var a = Box(); 1 + a.x = 3;",
+            65,
+            "Invalid assignment target.",
+        ),
+        (
+            "class Box {} var a = Box(); (a.x) = 3;",
+            65,
+            "Invalid assignment target.",
+        ),
+        (
+            "class Box {} var a = Box(); a.;",
+            65,
+            "Expected property name after '.'.",
+        ),
+    ] {
+        let output = run_program(source);
+        assert_eq!(output.status.code(), Some(code), "{source}: {output:?}");
+        assert!(
+            String::from_utf8(output.stderr).unwrap().contains(message),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn calling_classes_creates_distinct_instances_and_preserves_the_stack() {
     let output = run_program(
         r#"

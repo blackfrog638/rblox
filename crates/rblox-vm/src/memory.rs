@@ -101,6 +101,29 @@ impl Heap {
             .expect("Object was collected.")
     }
 
+    pub(crate) fn set_instance_field(
+        &mut self,
+        instance: ObjId,
+        name: ObjId,
+        value: Value,
+    ) -> Result<(), &'static str> {
+        let Object::Instance { fields, .. } = self.get_mut(instance) else {
+            return Err("Only instances have fields.");
+        };
+
+        let mut table = std::mem::take(fields);
+        let old_capacity = table.capacity();
+        table.set(name, value, self);
+        self.bytes_allocated = self.bytes_allocated.saturating_add(
+            (table.capacity() - old_capacity) * std::mem::size_of::<crate::table::Entry>(),
+        );
+        let Object::Instance { fields, .. } = self.get_mut(instance) else {
+            unreachable!("instance type cannot change during field assignment")
+        };
+        *fields = table;
+        Ok(())
+    }
+
     pub fn get_mut(&mut self, id: ObjId) -> &mut Object {
         self.slot(id);
         self.objects[id.index]
@@ -259,6 +282,38 @@ impl Default for Heap {
 mod tests {
     use super::*;
     use crate::object::{Closure, ObjFunction, Upvalue};
+
+    #[test]
+    fn field_table_growth_is_accounted_for_before_collection() {
+        let mut heap = Heap::new();
+        let class = heap.alloc(Object::Class { name: "Box".into() });
+        let instance = heap.alloc(Object::Instance {
+            class,
+            fields: Table::new(),
+        });
+        for index in 0..40 {
+            let Value::Obj(name) = heap.alloc_string(format!("field{index}")) else {
+                unreachable!()
+            };
+            heap.set_instance_field(instance, name, Value::Number(index as f64))
+                .unwrap();
+            heap.set_instance_field(instance, name, Value::Nil).unwrap();
+            let expected: usize = heap
+                .objects
+                .iter()
+                .filter_map(|slot| slot.object.as_ref())
+                .map(Object::managed_size)
+                .sum();
+            assert_eq!(heap.bytes_allocated(), expected);
+        }
+        heap.mark_roots([Value::Obj(instance)]);
+        heap.trace_references();
+        heap.finish_collection();
+        let Object::Instance { fields, .. } = heap.get(instance) else {
+            unreachable!()
+        };
+        assert_eq!(fields.len(), 40);
+    }
 
     #[test]
     fn instances_keep_their_class_field_keys_and_values_alive() {
