@@ -1,8 +1,8 @@
 use crate::chunk::{
-    Chunk, OP_ADD, OP_CALL, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL, OP_DIVIDE,
-    OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER, OP_JUMP,
-    OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT,
-    OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
+    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER,
+    OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP,
+    OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use crate::memory::Heap;
 
@@ -309,10 +309,12 @@ impl<'a, 'h> Parser<'a, 'h> {
     }
 
     fn declaration(&mut self) -> Result<(), String> {
-        let result = if self.match_token(TokenKind::Fun) {
+        let result: Result<(), String> = if self.match_token(TokenKind::Fun) {
             self.fun_declaration()
         } else if self.match_token(TokenKind::Var) {
             self.var_declaration()
+        } else if self.match_token(TokenKind::Class) {
+            self.class_declaration()
         } else {
             self.statement()
         };
@@ -324,6 +326,30 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.synchronize();
         }
         result
+    }
+
+    fn class_declaration(&mut self) -> Result<(), String> {
+        let name = self.consume_identifier("Expect class name.")?;
+        let global = self.declare_variable(name)?;
+        let name_constant = if let Some(global) = global {
+            global
+        } else {
+            let value = self.heap.alloc_string(name.lexeme.to_string());
+            self.current_chunk().add_constant(value)
+        };
+
+        self.emit(OP_CLASS);
+        self.emit(name_constant);
+
+        if let Some(global) = global {
+            self.define_variable(global);
+        } else {
+            self.mark_initialized();
+        }
+
+        self.consume(TokenKind::LeftBrace, "Expect '{' before class body.")?;
+        self.consume(TokenKind::RightBrace, "Expect '}' after class body.")?;
+        Ok(())
     }
 
     fn fun_declaration(&mut self) -> Result<(), String> {

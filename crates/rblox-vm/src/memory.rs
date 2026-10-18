@@ -72,6 +72,7 @@ impl Heap {
                 Object::Closure(_) => "closure",
                 Object::NativeFunction(_) => "native function",
                 Object::Upvalue(_) => "upvalue",
+                Object::Class { .. } => "class",
             },
             self.len(),
         );

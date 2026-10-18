@@ -43,7 +43,8 @@ impl Value {
             (Self::Obj(left), Self::Obj(right)) => match (heap.get(*left), heap.get(*right)) {
                 (Object::String { value: a, .. }, Object::String { value: b, .. }) => a == b,
                 (Object::Closure(_), Object::Closure(_))
-                | (Object::NativeFunction(_), Object::NativeFunction(_)) => left == right,
+                | (Object::NativeFunction(_), Object::NativeFunction(_))
+                | (Object::Class { .. }, Object::Class { .. }) => left == right,
                 _ => false,
             },
             _ => self == other,

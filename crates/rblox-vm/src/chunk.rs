@@ -31,6 +31,7 @@ pub const OP_GET_UPVALUE: u8 = 27;
 pub const OP_SET_UPVALUE: u8 = 28;
 pub const OP_CLOSURE: u8 = 29;
 pub const OP_CLOSE_UPVALUE: u8 = 30;
+pub const OP_CLASS: u8 = 31;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -120,6 +121,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
 
     match instruction {
         OP_CONSTANT => constant_instruction(chunk, offset, &prefix, "OP_CONSTANT", heap),
+        OP_CLASS => constant_instruction(chunk, offset, &prefix, "OP_CLASS", heap),
         OP_NIL => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
             (line, offset + 1)

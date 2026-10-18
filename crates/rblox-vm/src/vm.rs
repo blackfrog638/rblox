@@ -3,11 +3,11 @@ use std::time::Instant;
 use crate::memory::{Heap, ObjId};
 
 use crate::chunk::{
-    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
-    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE, OP_GREATER,
-    OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR,
-    OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
-    disassemble_instruction,
+    Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
+    OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_UPVALUE,
+    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL,
+    OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_UPVALUE,
+    OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue};
@@ -160,6 +160,13 @@ impl VM {
                     }
                     let closure = self.heap.alloc(Object::Closure(closure));
                     self.push(Value::Obj(closure));
+                }
+                OP_CLASS => {
+                    let name = self.read_constant_string()?;
+                    let class = self.heap.alloc(Object::Class {
+                        name: self.heap.get(name).string_value().unwrap().to_string(),
+                    });
+                    self.push(Value::Obj(class));
                 }
                 OP_GET_UPVALUE => {
                     let index = self.read_byte()? as usize;

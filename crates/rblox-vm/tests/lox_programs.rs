@@ -30,6 +30,48 @@ fn run_program(source: &str) -> Output {
 }
 
 #[test]
+fn classes_preserve_scope_identity_and_captured_locals() {
+    let output = run_program(
+        r#"
+        class A {}
+        var original = A;
+        print A;
+        print A == A;
+        {
+            class A {}
+            print A == original;
+        }
+        print A == original;
+        fun factory() {
+            class Local {}
+            fun capture() { return Local; }
+            return capture;
+        }
+        var capture = factory();
+        print capture();
+        print capture() == capture();
+        "#,
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "<class A>\ntrue\nfalse\ntrue\n<class Local>\ntrue\n"
+    );
+}
+
+#[test]
+fn class_declarations_reject_duplicate_locals_and_invalid_bodies() {
+    for source in [
+        "{ class A {} class A {} }",
+        "class A { print 1; }",
+        "class A {",
+    ] {
+        let output = run_program(source);
+        assert_eq!(output.status.code(), Some(65), "{source}: {output:?}");
+    }
+}
+
+#[test]
 fn native_function_can_be_stored_called_and_return_a_value_to_lox() {
     let output = run_program(
         r#"
@@ -49,7 +91,13 @@ fn native_function_can_be_stored_called_and_return_a_value_to_lox() {
         String::from_utf8(output.stdout).unwrap(),
         "true\ntrue\n<native function>\n"
     );
-    assert!(output.stderr.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr
+            .lines()
+            .all(|line| { cfg!(feature = "debug-gc") && line.starts_with("[GC] ") }),
+        "{stderr}"
+    );
 }
 
 #[test]
