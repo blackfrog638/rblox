@@ -40,6 +40,7 @@ pub struct VM {
     stack: Vec<Value>,
     open_upvalues: Option<ObjId>,
     globals: Table,
+    init_string: ObjId,
     trace_execution: bool,
     start_time: Instant,
 }
@@ -52,12 +53,17 @@ impl Default for VM {
 
 impl VM {
     pub fn new() -> Self {
+        let mut heap = Heap::new();
+        let Value::Obj(init_string) = heap.alloc_string("init".to_string()) else {
+            unreachable!("alloc_string always returns an object")
+        };
         let mut vm = Self {
-            heap: Heap::new(),
+            heap,
             call_stack: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::new(),
             open_upvalues: None,
             globals: Table::new(),
+            init_string,
             trace_execution: false,
             start_time: Instant::now(),
         };
@@ -426,8 +432,9 @@ impl VM {
                         Object::Upvalue(_) => {
                             return Err(self.runtime_error("Can only call functions."));
                         }
-                        Object::Class { .. } => {
-                            if arg_count != 0 {
+                        Object::Class { methods, .. } => {
+                            let initializer = methods.get(&self.init_string, &self.heap).copied();
+                            if initializer.is_none() && arg_count != 0 {
                                 return Err(self.runtime_error(&format!(
                                     "Expected 0 arguments but got {}.",
                                     arg_count
@@ -437,7 +444,11 @@ impl VM {
                                 class: callee,
                                 fields: Table::new(),
                             });
+                            // Reuse the callee slot as `this`, leaving arguments in place.
                             self.stack[callee_index] = Value::Obj(instance);
+                            if let Some(Value::Obj(initializer)) = initializer {
+                                self.call_function(initializer, arg_count)?;
+                            }
                         }
                         Object::Instance { .. } => {
                             return Err(self.runtime_error("Can only call functions and classes."));
@@ -825,6 +836,8 @@ impl VM {
         }
 
         roots.extend(self.globals.gc_roots());
+        // The intern table is weak; this cached method name must remain live.
+        roots.push(Value::Obj(self.init_string));
         self.heap.mark_roots(roots);
     }
 }

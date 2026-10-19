@@ -80,6 +80,7 @@ struct LoopContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
+    Initializer,
     Method,
     Script,
 }
@@ -240,7 +241,10 @@ impl<'a> Compiler<'a> {
             locals: vec![Local {
                 name: Token {
                     kind: TokenKind::Identifier,
-                    lexeme: if function_type == FunctionType::Method {
+                    lexeme: if matches!(
+                        function_type,
+                        FunctionType::Method | FunctionType::Initializer
+                    ) {
                         "this"
                     } else {
                         ""
@@ -392,7 +396,12 @@ impl<'a, 'h> Parser<'a, 'h> {
         let name = self.consume_identifier("Expect method name.")?;
         let value = self.heap.alloc_string(name.lexeme.to_string());
         let constant = self.current_chunk().add_constant(value);
-        let function = self.compile_function(name, FunctionType::Method)?;
+        let function_type = if name.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
+        let function = self.compile_function(name, function_type)?;
         self.emit_closure(function);
         self.emit(OP_METHOD);
         self.emit(constant);
@@ -635,13 +644,15 @@ impl<'a, 'h> Parser<'a, 'h> {
         }
 
         if self.match_token(TokenKind::Semicolon) {
-            self.emit(OP_NIL);
+            self.emit_return();
         } else {
+            if self.current_compiler().function_type == FunctionType::Initializer {
+                return Err("Compile error: Can't return a value from an initializer.".to_string());
+            }
             self.expression()?;
             self.consume(TokenKind::Semicolon, "Expected ';' after return value.")?;
+            self.emit(OP_RETURN);
         }
-
-        self.emit(OP_RETURN);
         Ok(())
     }
 
@@ -1140,7 +1151,12 @@ impl<'a, 'h> Parser<'a, 'h> {
     }
 
     fn emit_return(&mut self) {
-        self.emit(OP_NIL);
+        if self.current_compiler().function_type == FunctionType::Initializer {
+            self.emit(OP_GET_LOCAL);
+            self.emit(0);
+        } else {
+            self.emit(OP_NIL);
+        }
         self.emit(OP_RETURN);
     }
 
