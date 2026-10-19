@@ -30,6 +30,63 @@ fn run_program(source: &str) -> Output {
 }
 
 #[test]
+fn methods_can_be_called_detached_passed_returned_and_printed() {
+    let output = run_program(
+        r#"
+        class Calculator {
+            add(a, b) { return a + b; }
+            empty() {}
+        }
+        var calculator = Calculator();
+        print calculator.add(2, 3);
+        var method = calculator.add;
+        fun pass(f) { return f; }
+        print pass(method)(10, 20);
+        print method;
+        print method == method;
+        print calculator.add == calculator.add;
+        print calculator.empty();
+        calculator.add = "field";
+        print calculator.add;
+        print method(1, 2);
+        calculator.empty = nil;
+        print calculator.empty;
+    "#,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "5\n30\n<fn add>\ntrue\nfalse\nnil\nfield\n3\nnil\n"
+    );
+}
+
+#[test]
+fn method_calls_report_arity_missing_property_and_shadowing_errors() {
+    for (source, message) in [
+        (
+            "class C { m(a) {} } C().m();",
+            "Expected 1 arguments but got 0.",
+        ),
+        (
+            "class C { m(a) {} } var f = C().m; f(1, 2);",
+            "Expected 1 arguments but got 2.",
+        ),
+        ("class C {} C().missing();", "Undefined property 'missing'."),
+        (
+            "class C { m() {} } var c = C(); c.m = nil; c.m();",
+            "Can only call functions.",
+        ),
+    ] {
+        let output = run_program(source);
+        assert_eq!(output.status.code(), Some(70), "{output:?}");
+        assert!(
+            String::from_utf8(output.stderr).unwrap().contains(message),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn properties_support_aliases_chaining_nil_and_callable_values() {
     let output = run_program(
         r#"

@@ -232,18 +232,14 @@ impl VM {
                 OP_GET_PROPERTY => {
                     let name = self.read_constant_string()?;
                     let receiver = self.pop()?;
-                    let Some(Object::Instance { fields, .. }) = receiver.as_obj(&self.heap) else {
+                    let Some(Object::Instance { class, fields }) = receiver.as_obj(&self.heap)
+                    else {
                         return Err(self.runtime_error("Only instances have properties."));
                     };
-                    let value = fields.get(&name, &self.heap).copied().ok_or_else(|| {
-                        self.runtime_error(&format!(
-                            "Undefined property '{}'.",
-                            self.heap
-                                .get(name)
-                                .string_value()
-                                .expect("property name is a string")
-                        ))
-                    })?;
+                    let value = match fields.get(&name, &self.heap).copied() {
+                        Some(value) => value,
+                        None => self.bind_method(*class, name, receiver)?,
+                    };
                     self.push(value);
                 }
                 OP_SET_PROPERTY => {
@@ -416,6 +412,9 @@ impl VM {
                     };
                     match self.heap.get(callee) {
                         Object::Closure(_) => self.call_function(callee, arg_count)?,
+                        Object::BoundMethod { method, .. } => {
+                            self.call_function(*method, arg_count)?;
+                        }
                         Object::NativeFunction(function) => {
                             self.call_native(*function, callee_index, arg_count)?;
                         }
@@ -461,6 +460,31 @@ impl VM {
                 }
             }
         }
+    }
+
+    fn bind_method(&mut self, class: ObjId, name: ObjId, receiver: Value) -> Result<Value, String> {
+        let method = self.find_method(class, name)?;
+        // Allocation does not collect; the caller roots the result on the VM stack
+        // before the next instruction's GC safe point.
+        Ok(Value::Obj(
+            self.heap.alloc(Object::BoundMethod { receiver, method }),
+        ))
+    }
+
+    fn find_method(&self, class: ObjId, name: ObjId) -> Result<ObjId, String> {
+        let Object::Class { methods, .. } = self.heap.get(class) else {
+            return Err(self.runtime_error("Instance does not refer to a class."));
+        };
+        let Some(Value::Obj(method)) = methods.get(&name, &self.heap).copied() else {
+            return Err(self.runtime_error(&format!(
+                "Undefined property '{}'.",
+                self.heap
+                    .get(name)
+                    .string_value()
+                    .expect("property name is a string")
+            )));
+        };
+        Ok(method)
     }
 
     fn upvalue(&self, id: ObjId) -> &Upvalue {
@@ -678,7 +702,7 @@ impl VM {
             Object::Class { name, .. } => {
                 return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
             }
-            Object::Instance { .. } => {
+            Object::Instance { .. } | Object::BoundMethod { .. } => {
                 return Err(self.runtime_error("Can only call functions and classes."));
             }
         };
@@ -808,6 +832,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn escaped_bound_method_keeps_receiver_and_closed_captures_alive() {
+        let mut vm = VM::new();
+        let baseline = vm.heap.len();
+        vm.interpret(
+            r#"
+            var saved;
+            {
+                var text = "cap" + "tured";
+                class Local { read() { return text; } }
+                var instance = Local();
+                instance.payload = "re" + "ceiver";
+                saved = instance.read;
+            }
+        "#,
+        )
+        .unwrap();
+        vm.collect_garbage();
+        vm.interpret("if (saved() != \"captured\") nil();").unwrap();
+
+        let Value::Obj(key) = vm.heap.alloc_string("saved".into()) else {
+            unreachable!()
+        };
+        let bound = *vm.globals.get(&key, &vm.heap).unwrap();
+        let Some(Object::BoundMethod { receiver, method }) = bound.as_obj(&vm.heap) else {
+            unreachable!()
+        };
+        let receiver = *receiver;
+        assert!(matches!(vm.heap.get(*method), Object::Closure(_)));
+        let Value::Obj(payload) = vm.heap.alloc_string("payload".into()) else {
+            unreachable!()
+        };
+        let Some(Object::Instance { fields, .. }) = receiver.as_obj(&vm.heap) else {
+            unreachable!()
+        };
+        assert_eq!(
+            fields
+                .get(&payload, &vm.heap)
+                .unwrap()
+                .as_string(&vm.heap)
+                .unwrap(),
+            "receiver"
+        );
+
+        vm.interpret("saved = nil;").unwrap();
+        vm.collect_garbage();
+        assert_eq!(vm.heap.len(), baseline + 1);
+    }
+
+    #[test]
     fn method_tables_preserve_closures_captures_and_local_class_cycles() {
         let mut vm = VM::new();
         let baseline = vm.heap.len();
@@ -841,8 +914,8 @@ mod tests {
         };
         assert_eq!(methods.len(), 2);
 
-        // Inspect and execute the stored closures directly; method binding is
-        // introduced in the next section, not needed to verify declarations.
+        // Inspect the stored closures directly to isolate declaration behavior
+        // from method lookup and receiver binding.
         for (name, assertion) in [
             ("read", "if (extracted() != \"kept\") nil();"),
             ("own", "if (extracted() != saved) nil();"),

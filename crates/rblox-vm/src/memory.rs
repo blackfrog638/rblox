@@ -70,6 +70,7 @@ impl Heap {
                 Object::String { .. } => "string",
                 Object::Function(_) => "function",
                 Object::Closure(_) => "closure",
+                Object::BoundMethod { .. } => "bound method",
                 Object::NativeFunction(_) => "native function",
                 Object::Upvalue(_) => "upvalue",
                 Object::Class { .. } => "class",
@@ -261,6 +262,13 @@ impl Heap {
                 Object::Closure(closure) => std::iter::once(closure.function)
                     .chain(closure.upvalues.iter().copied())
                     .collect(),
+                Object::BoundMethod { receiver, method } => {
+                    let mut references = vec![*method];
+                    if let Value::Obj(instance) = receiver {
+                        references.push(*instance);
+                    }
+                    references
+                }
                 Object::Upvalue(upvalue) => upvalue
                     .closed
                     .iter()

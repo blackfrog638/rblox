@@ -8,6 +8,7 @@ pub enum Object {
     String { value: String, hash: u32 },
     Function(ObjFunction),
     Closure(Closure),
+    BoundMethod { receiver: Value, method: ObjId },
     NativeFunction(NativeFn),
     Upvalue(Upvalue),
     Class { name: String, methods: Table },
@@ -34,7 +35,7 @@ impl Object {
                     name.capacity()
                         + methods.capacity() * std::mem::size_of::<crate::table::Entry>()
                 }
-                Self::NativeFunction(_) | Self::Upvalue(_) => 0,
+                Self::NativeFunction(_) | Self::Upvalue(_) | Self::BoundMethod { .. } => 0,
                 Self::Instance { fields, .. } => {
                     fields.capacity() * std::mem::size_of::<crate::table::Entry>()
                 }
@@ -44,7 +45,7 @@ impl Object {
     pub fn string_hash(&self) -> Option<u32> {
         match self {
             Object::String { hash, .. } => Some(*hash),
-            Object::Function(_) | Object::Closure(_) => None,
+            Object::Function(_) | Object::Closure(_) | Object::BoundMethod { .. } => None,
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
             Object::Class { .. } => None,
@@ -55,7 +56,7 @@ impl Object {
     pub fn string_value(&self) -> Option<&str> {
         match self {
             Object::String { value, .. } => Some(value),
-            Object::Function(_) | Object::Closure(_) => None,
+            Object::Function(_) | Object::Closure(_) | Object::BoundMethod { .. } => None,
             Object::NativeFunction(_) => None,
             Object::Upvalue(_) => None,
             Object::Class { .. } => None,

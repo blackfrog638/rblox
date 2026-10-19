@@ -20,6 +20,7 @@ impl Value {
                 Object::Function(function) => Some(function),
                 _ => None,
             },
+            Object::BoundMethod { method, .. } => Value::Obj(*method).as_function(heap),
             _ => None,
         }
     }
@@ -43,6 +44,7 @@ impl Value {
             (Self::Obj(left), Self::Obj(right)) => match (heap.get(*left), heap.get(*right)) {
                 (Object::String { value: a, .. }, Object::String { value: b, .. }) => a == b,
                 (Object::Closure(_), Object::Closure(_))
+                | (Object::BoundMethod { .. }, Object::BoundMethod { .. })
                 | (Object::NativeFunction(_), Object::NativeFunction(_))
                 | (Object::Class { .. }, Object::Class { .. })
                 | (Object::Instance { .. }, Object::Instance { .. }) => left == right,
@@ -84,6 +86,10 @@ impl fmt::Display for ValueDisplay<'_> {
                     _ => write!(f, "<invalid closure>"),
                 },
                 Object::NativeFunction(_) => write!(f, "<native function>"),
+                Object::BoundMethod { .. } => match self.value.as_function(self.heap) {
+                    Some(function) => write!(f, "{}", function),
+                    None => write!(f, "<invalid bound method>"),
+                },
                 Object::Upvalue(_) => write!(f, "<upvalue>"),
                 Object::Class { name, .. } => write!(f, "<class {}>", name),
                 Object::Instance { class, .. } => match self.heap.get(*class) {
