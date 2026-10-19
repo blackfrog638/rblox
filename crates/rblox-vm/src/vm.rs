@@ -5,9 +5,9 @@ use crate::memory::{Heap, ObjId};
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
     OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY,
-    OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY,
-    OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
-    OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
+    OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue};
@@ -168,6 +168,16 @@ impl VM {
                         methods: Table::new(),
                     });
                     self.push(Value::Obj(class));
+                }
+                OP_METHOD => {
+                    let name = self.read_constant_string()?;
+                    let method = self.pop()?;
+                    let Some(Value::Obj(class)) = self.stack.last().copied() else {
+                        return Err(self.runtime_error("Method declaration requires a class."));
+                    };
+                    self.heap
+                        .set_class_method(class, name, method)
+                        .map_err(|error| self.runtime_error(error))?;
                 }
                 OP_GET_UPVALUE => {
                     let index = self.read_byte()? as usize;
@@ -796,6 +806,65 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn method_tables_preserve_closures_captures_and_local_class_cycles() {
+        let mut vm = VM::new();
+        let baseline = vm.heap.len();
+        vm.interpret(
+            r#"
+            var saved;
+            var extracted;
+            {
+                var text = "ke" + "pt";
+                class Local {
+                    read(a, b) { nil(); }
+                    read() { return text; }
+                    own() { return Local; }
+                }
+                saved = Local;
+                var after = 123;
+                if (after != 123) nil();
+            }
+        "#,
+        )
+        .unwrap();
+        vm.collect_garbage();
+        let Value::Obj(saved_key) = vm.heap.alloc_string("saved".into()) else {
+            unreachable!()
+        };
+        let Value::Obj(class) = *vm.globals.get(&saved_key, &vm.heap).unwrap() else {
+            unreachable!()
+        };
+        let Object::Class { methods, .. } = vm.heap.get(class) else {
+            unreachable!()
+        };
+        assert_eq!(methods.len(), 2);
+
+        // Inspect and execute the stored closures directly; method binding is
+        // introduced in the next section, not needed to verify declarations.
+        for (name, assertion) in [
+            ("read", "if (extracted() != \"kept\") nil();"),
+            ("own", "if (extracted() != saved) nil();"),
+        ] {
+            let Value::Obj(key) = vm.heap.alloc_string(name.into()) else {
+                unreachable!()
+            };
+            let Object::Class { methods, .. } = vm.heap.get(class) else {
+                unreachable!()
+            };
+            let method = *methods.get(&key, &vm.heap).unwrap();
+            assert_eq!(method.as_function(&vm.heap).unwrap().arity, 0);
+            let Value::Obj(extracted) = vm.heap.alloc_string("extracted".into()) else {
+                unreachable!()
+            };
+            vm.globals.set(extracted, method, &vm.heap);
+            vm.interpret(assertion).unwrap();
+        }
+        vm.interpret("saved = nil; extracted = nil;").unwrap();
+        vm.collect_garbage();
+        assert_eq!(vm.heap.len(), baseline + 2);
+    }
 
     #[test]
     fn automatic_collection_runs_inside_a_long_running_script() {

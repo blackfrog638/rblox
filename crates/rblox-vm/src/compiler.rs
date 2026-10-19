@@ -1,8 +1,8 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
     OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_UPVALUE,
-    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_MULTIPLY, OP_NEGATE, OP_NIL,
-    OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY,
+    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD, OP_MULTIPLY, OP_NEGATE,
+    OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY,
     OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use crate::memory::Heap;
@@ -354,6 +354,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.mark_initialized();
         }
 
+        self.named_variable(name.lexeme.to_string(), false)?;
         self.consume(TokenKind::LeftBrace, "Expect '{' before class body.")?;
         while self.peek().kind != TokenKind::RightBrace
             && !matches!(self.peek().kind, TokenKind::Eof)
@@ -361,12 +362,18 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.method_declaration()?;
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after class body.")?;
+        self.emit(OP_POP);
         Ok(())
     }
 
     fn method_declaration(&mut self) -> Result<(), String> {
-        self.consume(TokenKind::Identifier, "Expect method name.")?;
-
+        let name = self.consume_identifier("Expect method name.")?;
+        let value = self.heap.alloc_string(name.lexeme.to_string());
+        let constant = self.current_chunk().add_constant(value);
+        let function = self.compile_function(name)?;
+        self.emit_closure(function);
+        self.emit(OP_METHOD);
+        self.emit(constant);
         Ok(())
     }
 
@@ -379,6 +386,15 @@ impl<'a, 'h> Parser<'a, 'h> {
         }
 
         let function = self.compile_function(name)?;
+        self.emit_closure(function);
+
+        if let Some(global) = global {
+            self.define_variable(global);
+        }
+        Ok(())
+    }
+
+    fn emit_closure(&mut self, function: ObjFunction) {
         let captures = function.upvalues.clone();
         let function = self.heap.alloc(Object::Function(function));
         let constant = self.current_chunk().add_constant(Value::Obj(function));
@@ -388,11 +404,6 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.emit(u8::from(capture.is_local));
             self.emit(capture.index);
         }
-
-        if let Some(global) = global {
-            self.define_variable(global);
-        }
-        Ok(())
     }
 
     fn compile_function(&mut self, name: Token<'a>) -> Result<ObjFunction, String> {
@@ -892,6 +903,10 @@ impl<'a, 'h> Parser<'a, 'h> {
 
     fn parse_variable_expression(&mut self, can_assign: bool) -> Result<(), String> {
         let name = self.previous().lexeme.to_string();
+        self.named_variable(name, can_assign)
+    }
+
+    fn named_variable(&mut self, name: String, can_assign: bool) -> Result<(), String> {
         let local = self.current_compiler().resolve_local(&name)?;
         let upvalue = if local.is_none() {
             self.resolve_upvalue(self.compilers.len() - 1, &name)?

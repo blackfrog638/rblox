@@ -34,6 +34,7 @@ pub const OP_CLOSE_UPVALUE: u8 = 30;
 pub const OP_CLASS: u8 = 31;
 pub const OP_GET_PROPERTY: u8 = 32;
 pub const OP_SET_PROPERTY: u8 = 33;
+pub const OP_METHOD: u8 = 34;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -126,6 +127,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
         OP_CLASS => constant_instruction(chunk, offset, &prefix, "OP_CLASS", heap),
         OP_GET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_GET_PROPERTY", heap),
         OP_SET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_SET_PROPERTY", heap),
+        OP_METHOD => constant_instruction(chunk, offset, &prefix, "OP_METHOD", heap),
         OP_NIL => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
             (line, offset + 1)

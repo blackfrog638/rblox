@@ -107,20 +107,40 @@ impl Heap {
         name: ObjId,
         value: Value,
     ) -> Result<(), &'static str> {
-        let Object::Instance { fields, .. } = self.get_mut(instance) else {
-            return Err("Only instances have fields.");
-        };
+        self.set_object_table_entry(instance, name, value, |object| match object {
+            Object::Instance { fields, .. } => Ok(fields),
+            _ => Err("Only instances have fields."),
+        })
+    }
 
-        let mut table = std::mem::take(fields);
+    pub(crate) fn set_class_method(
+        &mut self,
+        class: ObjId,
+        name: ObjId,
+        method: Value,
+    ) -> Result<(), &'static str> {
+        self.set_object_table_entry(class, name, method, |object| match object {
+            Object::Class { methods, .. } => Ok(methods),
+            _ => Err("Method declaration requires a class."),
+        })
+    }
+
+    fn set_object_table_entry(
+        &mut self,
+        object: ObjId,
+        name: ObjId,
+        value: Value,
+        select: fn(&mut Object) -> Result<&mut Table, &'static str>,
+    ) -> Result<(), &'static str> {
+        // Detach the table while its insertion reads keys from the heap.
+        // Collection only runs between instructions, after the table is restored.
+        let mut table = std::mem::take(select(self.get_mut(object))?);
         let old_capacity = table.capacity();
         table.set(name, value, self);
         self.bytes_allocated = self.bytes_allocated.saturating_add(
             (table.capacity() - old_capacity) * std::mem::size_of::<crate::table::Entry>(),
         );
-        let Object::Instance { fields, .. } = self.get_mut(instance) else {
-            unreachable!("instance type cannot change during field assignment")
-        };
-        *fields = table;
+        *select(self.get_mut(object))? = table;
         Ok(())
     }
 
@@ -250,7 +270,13 @@ impl Heap {
                     })
                     .chain(upvalue.next)
                     .collect(),
-                Object::Class { .. } => Vec::new(),
+                Object::Class { methods, .. } => methods
+                    .gc_roots()
+                    .filter_map(|value| match value {
+                        Value::Obj(id) => Some(id),
+                        _ => None,
+                    })
+                    .collect(),
                 Object::Instance { class, fields } => fields
                     .gc_roots()
                     .filter_map(|value| match value {
