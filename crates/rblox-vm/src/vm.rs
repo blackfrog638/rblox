@@ -165,6 +165,7 @@ impl VM {
                     let name = self.read_constant_string()?;
                     let class = self.heap.alloc(Object::Class {
                         name: self.heap.get(name).string_value().unwrap().to_string(),
+                        methods: Table::new(),
                     });
                     self.push(Value::Obj(class));
                 }
@@ -664,7 +665,7 @@ impl VM {
             Object::Upvalue(_) => {
                 return Err(self.runtime_error("Can only call functions."));
             }
-            Object::Class { name } => {
+            Object::Class { name, .. } => {
                 return Err(self.runtime_error(&format!("Cannot call class {}.", name)));
             }
             Object::Instance { .. } => {

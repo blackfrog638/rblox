@@ -10,7 +10,7 @@ pub enum Object {
     Closure(Closure),
     NativeFunction(NativeFn),
     Upvalue(Upvalue),
-    Class { name: String },
+    Class { name: String, methods: Table },
     Instance { class: ObjId, fields: Table },
 }
 
@@ -30,7 +30,10 @@ impl Object {
                 Self::Closure(closure) => {
                     closure.upvalues.capacity() * std::mem::size_of::<ObjId>()
                 }
-                Self::Class { name } => name.capacity(),
+                Self::Class { name, methods } => {
+                    name.capacity()
+                        + methods.capacity() * std::mem::size_of::<crate::table::Entry>()
+                }
                 Self::NativeFunction(_) | Self::Upvalue(_) => 0,
                 Self::Instance { fields, .. } => {
                     fields.capacity() * std::mem::size_of::<crate::table::Entry>()

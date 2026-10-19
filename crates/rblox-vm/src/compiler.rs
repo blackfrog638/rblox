@@ -355,7 +355,18 @@ impl<'a, 'h> Parser<'a, 'h> {
         }
 
         self.consume(TokenKind::LeftBrace, "Expect '{' before class body.")?;
+        while self.peek().kind != TokenKind::RightBrace
+            && !matches!(self.peek().kind, TokenKind::Eof)
+        {
+            self.method_declaration()?;
+        }
         self.consume(TokenKind::RightBrace, "Expect '}' after class body.")?;
+        Ok(())
+    }
+
+    fn method_declaration(&mut self) -> Result<(), String> {
+        self.consume(TokenKind::Identifier, "Expect method name.")?;
+
         Ok(())
     }
 

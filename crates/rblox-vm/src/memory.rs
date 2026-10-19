@@ -286,7 +286,10 @@ mod tests {
     #[test]
     fn field_table_growth_is_accounted_for_before_collection() {
         let mut heap = Heap::new();
-        let class = heap.alloc(Object::Class { name: "Box".into() });
+        let class = heap.alloc(Object::Class {
+            name: "Box".into(),
+            methods: Table::new(),
+        });
         let instance = heap.alloc(Object::Instance {
             class,
             fields: Table::new(),
@@ -318,7 +321,10 @@ mod tests {
     #[test]
     fn instances_keep_their_class_field_keys_and_values_alive() {
         let mut heap = Heap::new();
-        let class = heap.alloc(Object::Class { name: "Box".into() });
+        let class = heap.alloc(Object::Class {
+            name: "Box".into(),
+            methods: Table::new(),
+        });
         let Value::Obj(key) = heap.alloc_string("item".into()) else {
             unreachable!()
         };
