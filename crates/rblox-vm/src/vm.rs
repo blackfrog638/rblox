@@ -412,8 +412,10 @@ impl VM {
                     };
                     match self.heap.get(callee) {
                         Object::Closure(_) => self.call_function(callee, arg_count)?,
-                        Object::BoundMethod { method, .. } => {
-                            self.call_function(*method, arg_count)?;
+                        Object::BoundMethod { receiver, method } => {
+                            let (receiver, method) = (*receiver, *method);
+                            self.stack[callee_index] = receiver;
+                            self.call_function(method, arg_count)?;
                         }
                         Object::NativeFunction(function) => {
                             self.call_native(*function, callee_index, arg_count)?;

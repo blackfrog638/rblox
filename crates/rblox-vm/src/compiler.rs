@@ -80,6 +80,7 @@ struct LoopContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
+    Method,
     Script,
 }
 
@@ -90,6 +91,7 @@ enum PrefixRule {
     String,
     Literal,
     Identifier,
+    This,
 }
 
 enum InfixRule {
@@ -200,6 +202,11 @@ fn get_rule(kind: TokenKind) -> ParseRule {
             infix: None,
             precedence: Precedence::None,
         },
+        TokenKind::This => ParseRule {
+            prefix: Some(PrefixRule::This),
+            infix: None,
+            precedence: Precedence::None,
+        },
         TokenKind::Dot => ParseRule {
             prefix: None,
             infix: Some(InfixRule::Dot),
@@ -229,11 +236,15 @@ impl<'a> Compiler<'a> {
             function: ObjFunction::new(),
             function_type,
             scope_depth: 0,
-            // Slot zero holds the called function, before parameters and locals.
+            // Methods receive their instance in slot zero; functions keep the callee there.
             locals: vec![Local {
                 name: Token {
                     kind: TokenKind::Identifier,
-                    lexeme: "",
+                    lexeme: if function_type == FunctionType::Method {
+                        "this"
+                    } else {
+                        ""
+                    },
                     line: 0,
                 },
                 depth: 0,
@@ -277,12 +288,15 @@ impl<'a> Compiler<'a> {
     }
 }
 
+struct ClassCompiler;
+
 struct Parser<'a, 'h> {
     heap: &'h mut Heap,
     tokens: &'a [Token<'a>],
     current: usize,
     panic_mode: bool,
     compilers: Vec<Compiler<'a>>,
+    classes: Vec<ClassCompiler>,
 }
 
 impl<'a, 'h> Parser<'a, 'h> {
@@ -293,6 +307,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             current: 0,
             panic_mode: false,
             compilers: vec![Compiler::new(FunctionType::Script)],
+            classes: Vec::new(),
         }
     }
 
@@ -336,6 +351,13 @@ impl<'a, 'h> Parser<'a, 'h> {
     }
 
     fn class_declaration(&mut self) -> Result<(), String> {
+        self.classes.push(ClassCompiler);
+        let result = self.compile_class();
+        self.classes.pop();
+        result
+    }
+
+    fn compile_class(&mut self) -> Result<(), String> {
         let name = self.consume_identifier("Expect class name.")?;
         let global = self.declare_variable(name)?;
         let name_constant = if let Some(global) = global {
@@ -370,7 +392,7 @@ impl<'a, 'h> Parser<'a, 'h> {
         let name = self.consume_identifier("Expect method name.")?;
         let value = self.heap.alloc_string(name.lexeme.to_string());
         let constant = self.current_chunk().add_constant(value);
-        let function = self.compile_function(name)?;
+        let function = self.compile_function(name, FunctionType::Method)?;
         self.emit_closure(function);
         self.emit(OP_METHOD);
         self.emit(constant);
@@ -385,7 +407,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.mark_initialized();
         }
 
-        let function = self.compile_function(name)?;
+        let function = self.compile_function(name, FunctionType::Function)?;
         self.emit_closure(function);
 
         if let Some(global) = global {
@@ -406,8 +428,12 @@ impl<'a, 'h> Parser<'a, 'h> {
         }
     }
 
-    fn compile_function(&mut self, name: Token<'a>) -> Result<ObjFunction, String> {
-        let mut compiler = Compiler::new(FunctionType::Function);
+    fn compile_function(
+        &mut self,
+        name: Token<'a>,
+        kind: FunctionType,
+    ) -> Result<ObjFunction, String> {
+        let mut compiler = Compiler::new(kind);
         compiler.function.name = Some(name.lexeme.to_string());
         self.compilers.push(compiler);
         self.begin_scope();
@@ -867,6 +893,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             PrefixRule::Literal => self.parse_literal()?,
             PrefixRule::String => self.parse_string()?,
             PrefixRule::Identifier => self.parse_variable_expression(can_assign)?,
+            PrefixRule::This => self.parse_this()?,
         }
 
         while precedence <= get_rule(self.peek().kind).precedence {
@@ -885,6 +912,13 @@ impl<'a, 'h> Parser<'a, 'h> {
         }
 
         Ok(())
+    }
+
+    fn parse_this(&mut self) -> Result<(), String> {
+        if self.classes.is_empty() {
+            return Err("Compile error: Can't use 'this' outside of a class.".to_string());
+        }
+        self.parse_variable_expression(false)
     }
 
     fn parse_dot(&mut self, can_assign: bool) -> Result<(), String> {
@@ -1149,6 +1183,29 @@ impl<'a, 'h> Parser<'a, 'h> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_nested_class_restores_class_and_function_context() {
+        let mut heap = Heap::new();
+        let mut scanner =
+            Scanner::new("class Outer { method() { class Inner { bad() { print ; } } } }");
+        let mut tokens = Vec::new();
+        loop {
+            let token = scanner.scan_token();
+            tokens.push(token);
+            if token.kind == TokenKind::Eof {
+                break;
+            }
+        }
+        let mut parser = Parser::new(&tokens, &mut heap);
+        assert!(parser.declaration().is_err());
+        assert!(parser.classes.is_empty());
+        assert_eq!(parser.compilers.len(), 1);
+        assert_eq!(
+            parser.current_compiler().function_type,
+            FunctionType::Script
+        );
+    }
 
     #[test]
     fn nested_function_error_restores_the_enclosing_compiler() {
