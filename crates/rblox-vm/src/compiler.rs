@@ -1,9 +1,9 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
     OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_UPVALUE,
-    OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD, OP_MULTIPLY, OP_NEGATE,
-    OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY,
-    OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    OP_GREATER, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD, OP_MULTIPLY,
+    OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
+    OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use crate::memory::Heap;
 
@@ -939,10 +939,16 @@ impl<'a, 'h> Parser<'a, 'h> {
         if can_assign && self.match_token(TokenKind::Equal) {
             self.expression()?;
             self.emit(OP_SET_PROPERTY);
+            self.emit(constant);
+        } else if self.match_token(TokenKind::LeftParen) {
+            let arg_count = self.argument_list()?;
+            self.emit(OP_INVOKE);
+            self.emit(constant);
+            self.emit(arg_count as u8);
         } else {
             self.emit(OP_GET_PROPERTY);
+            self.emit(constant);
         }
-        self.emit(constant);
         Ok(())
     }
 

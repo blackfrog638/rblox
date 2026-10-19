@@ -29,6 +29,25 @@ fn run_program(source: &str) -> Output {
         .expect("run rblox-vm")
 }
 
+#[cfg(feature = "debug-gc")]
+#[test]
+fn direct_method_calls_avoid_temporary_bound_method_allocations() {
+    for (call, expected_allocations) in [("counter.tick();", 0), ("(counter.tick)();", 5)] {
+        let source = format!(
+            "class Counter {{ tick() {{}} }} var counter = Counter(); \
+             for (var i = 0; i < 5; i = i + 1) {{ {call} }}"
+        );
+        let output = run_program(&source);
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            stderr.matches("(bound method)").count(),
+            expected_allocations,
+            "{call}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn methods_can_be_called_detached_passed_returned_and_printed() {
     let output = run_program(

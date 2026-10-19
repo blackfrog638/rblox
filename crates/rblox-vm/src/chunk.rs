@@ -35,6 +35,7 @@ pub const OP_CLASS: u8 = 31;
 pub const OP_GET_PROPERTY: u8 = 32;
 pub const OP_SET_PROPERTY: u8 = 33;
 pub const OP_METHOD: u8 = 34;
+pub const OP_INVOKE: u8 = 35;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -218,6 +219,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
             (line, next_offset)
         }
         OP_CALL => byte_instruction(chunk, offset, &prefix, "OP_CALL"),
+        OP_INVOKE => invoke_instruction(chunk, offset, &prefix, heap),
         OP_CLOSURE => {
             let (mut text, mut next) =
                 constant_instruction(chunk, offset, &prefix, "OP_CLOSURE", heap);
@@ -295,6 +297,17 @@ fn constant_instruction(
         format!("{}{} {:4} {}", prefix, name, index, value_text),
         offset + 2,
     )
+}
+
+fn invoke_instruction(chunk: &Chunk, offset: usize, prefix: &str, heap: &Heap) -> (String, usize) {
+    let (text, next) = constant_instruction(chunk, offset, prefix, "OP_INVOKE", heap);
+    if next == offset + 1 {
+        return (text, next);
+    }
+    let Some(arg_count) = chunk.code.get(next) else {
+        return (format!("{text} <missing argument count>"), next);
+    };
+    (format!("{text} ({arg_count} args)"), next + 1)
 }
 
 fn byte_instruction(chunk: &Chunk, offset: usize, prefix: &str, name: &str) -> (String, usize) {

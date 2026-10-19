@@ -1,14 +1,16 @@
 use rblox_vm::chunk::{OP_CALL, OP_GET_PROPERTY};
-use rblox_vm::{Heap, VM, compile, disassemble_instruction};
+use rblox_vm::{Heap, VM, compile, disassemble_chunk, disassemble_instruction};
 
 #[test]
-fn direct_and_detached_method_calls_reuse_property_and_call_instructions() {
+fn direct_calls_use_invoke_while_detached_calls_keep_property_access() {
     let mut heap = Heap::new();
     let script = compile(
         "obj.method(1); var method = obj.method; method(2);",
         &mut heap,
     )
     .unwrap();
+    let assembly = disassemble_chunk(&script.chunk, "script", &heap);
+    assert!(assembly.contains("OP_INVOKE"), "{assembly}");
     let mut offset = 0;
     let mut operations = Vec::new();
     while offset < script.chunk.code.len() {
@@ -19,10 +21,7 @@ fn direct_and_detached_method_calls_reuse_property_and_call_instructions() {
         }
         offset = next;
     }
-    assert_eq!(
-        operations,
-        [OP_GET_PROPERTY, OP_CALL, OP_GET_PROPERTY, OP_CALL]
-    );
+    assert_eq!(operations, [OP_GET_PROPERTY, OP_CALL]);
 }
 
 #[test]

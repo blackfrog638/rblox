@@ -5,7 +5,7 @@ use crate::memory::{Heap, ObjId};
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
     OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY,
-    OP_GET_UPVALUE, OP_GREATER, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
+    OP_GET_UPVALUE, OP_GREATER, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
     OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
     OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
 };
@@ -407,53 +407,12 @@ impl VM {
                 }
                 OP_CALL => {
                     let arg_count = self.read_byte()? as usize;
-                    let callee_index = self
-                        .stack
-                        .len()
-                        .checked_sub(arg_count + 1)
-                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
-                    let callee = self.stack[callee_index];
-                    let Value::Obj(callee) = callee else {
-                        return Err(self.runtime_error("Can only call functions."));
-                    };
-                    match self.heap.get(callee) {
-                        Object::Closure(_) => self.call_function(callee, arg_count)?,
-                        Object::BoundMethod { receiver, method } => {
-                            let (receiver, method) = (*receiver, *method);
-                            self.stack[callee_index] = receiver;
-                            self.call_function(method, arg_count)?;
-                        }
-                        Object::NativeFunction(function) => {
-                            self.call_native(*function, callee_index, arg_count)?;
-                        }
-                        Object::Function(_) | Object::String { .. } => {
-                            return Err(self.runtime_error("Can only call functions."));
-                        }
-                        Object::Upvalue(_) => {
-                            return Err(self.runtime_error("Can only call functions."));
-                        }
-                        Object::Class { methods, .. } => {
-                            let initializer = methods.get(&self.init_string, &self.heap).copied();
-                            if initializer.is_none() && arg_count != 0 {
-                                return Err(self.runtime_error(&format!(
-                                    "Expected 0 arguments but got {}.",
-                                    arg_count
-                                )));
-                            }
-                            let instance = self.heap.alloc(Object::Instance {
-                                class: callee,
-                                fields: Table::new(),
-                            });
-                            // Reuse the callee slot as `this`, leaving arguments in place.
-                            self.stack[callee_index] = Value::Obj(instance);
-                            if let Some(Value::Obj(initializer)) = initializer {
-                                self.call_function(initializer, arg_count)?;
-                            }
-                        }
-                        Object::Instance { .. } => {
-                            return Err(self.runtime_error("Can only call functions and classes."));
-                        }
-                    }
+                    self.call_value(arg_count)?;
+                }
+                OP_INVOKE => {
+                    let name = self.read_constant_string()?;
+                    let arg_count = self.read_byte()? as usize;
+                    self.invoke(name, arg_count)?;
                 }
                 OP_CLOSE_UPVALUE => {
                     let last = self
@@ -473,6 +432,34 @@ impl VM {
                 }
             }
         }
+    }
+
+    fn invoke(&mut self, name: ObjId, arg_count: usize) -> Result<(), String> {
+        let receiver_index = self
+            .stack
+            .len()
+            .checked_sub(arg_count + 1)
+            .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+        let receiver = self.stack[receiver_index];
+        let Some(Object::Instance { class, fields }) = receiver.as_obj(&self.heap) else {
+            return Err(self.runtime_error("Only instances have methods."));
+        };
+        let class = *class;
+        if let Some(value) = fields.get(&name, &self.heap).copied() {
+            self.stack[receiver_index] = value;
+            return self.call_value(arg_count);
+        }
+        self.invoke_from_class(class, name, arg_count)
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        class: ObjId,
+        name: ObjId,
+        arg_count: usize,
+    ) -> Result<(), String> {
+        let method = self.find_method(class, name)?;
+        self.call_function(method, arg_count)
     }
 
     fn bind_method(&mut self, class: ObjId, name: ObjId, receiver: Value) -> Result<Value, String> {
@@ -674,6 +661,52 @@ impl VM {
         }
 
         Ok(Value::Number(vm.start_time.elapsed().as_secs_f64()))
+    }
+
+    fn call_value(&mut self, arg_count: usize) -> Result<(), String> {
+        let callee_index = self
+            .stack
+            .len()
+            .checked_sub(arg_count + 1)
+            .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+        let Value::Obj(callee) = self.stack[callee_index] else {
+            return Err(self.runtime_error("Can only call functions."));
+        };
+        match self.heap.get(callee) {
+            Object::Closure(_) => self.call_function(callee, arg_count),
+            Object::BoundMethod { receiver, method } => {
+                let (receiver, method) = (*receiver, *method);
+                self.stack[callee_index] = receiver;
+                self.call_function(method, arg_count)
+            }
+            Object::NativeFunction(function) => {
+                self.call_native(*function, callee_index, arg_count)
+            }
+            Object::Function(_) | Object::String { .. } | Object::Upvalue(_) => {
+                Err(self.runtime_error("Can only call functions."))
+            }
+            Object::Class { methods, .. } => {
+                let initializer = methods.get(&self.init_string, &self.heap).copied();
+                if initializer.is_none() && arg_count != 0 {
+                    return Err(
+                        self.runtime_error(&format!("Expected 0 arguments but got {}.", arg_count))
+                    );
+                }
+                let instance = self.heap.alloc(Object::Instance {
+                    class: callee,
+                    fields: Table::new(),
+                });
+                // Reuse the callee slot as `this`, leaving arguments in place.
+                self.stack[callee_index] = Value::Obj(instance);
+                if let Some(Value::Obj(initializer)) = initializer {
+                    self.call_function(initializer, arg_count)?;
+                }
+                Ok(())
+            }
+            Object::Instance { .. } => {
+                Err(self.runtime_error("Can only call functions and classes."))
+            }
+        }
     }
 
     fn call_native(
