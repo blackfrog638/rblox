@@ -2,6 +2,7 @@
 name = "rblox-vm"
 version = "0.1.0"
 edition = "2024"
+default-run = "rblox-vm"
 
 [lib]
 name = "rblox_vm"
@@ -17,3 +18,4 @@ path = "src/main.rs"
 default = []
 debug-gc = []
 stress-gc = []
+profiling = []

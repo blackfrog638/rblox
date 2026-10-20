@@ -25,6 +25,16 @@ cargo run -- path/to/script.lox
 - Rust 2021
 - Entry point: `src/main.rs`
 
+## Bytecode VM performance
+
+The bytecode VM lives in `crates/rblox-vm` (Rust 2024).
+See [benchmark and profiling instructions](docs/performance.md) for repeatable
+measurements, Lox function/bytecode statistics, and native Rust CPU sampling.
+
+```powershell
+cargo run -p rblox-vm --bin rblox-bench --release -- --csv target/benchmarks/baseline.csv
+```
+
 ## License
 
 MIT

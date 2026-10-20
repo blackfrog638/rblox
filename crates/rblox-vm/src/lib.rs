@@ -16,6 +16,8 @@ pub mod chunk;
 pub mod compiler;
 pub mod memory;
 pub mod object;
+#[cfg(feature = "profiling")]
+pub mod profiler;
 pub mod scanner;
 pub mod table;
 pub mod value;

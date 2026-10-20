@@ -1,0 +1,19 @@
+class Box {}
+fun bench(n) {
+    var text = "";
+    var length = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        var box = Box();
+        text = text + "x";
+        box.text = text;
+        length = length + 1;
+        if (length == 32) {
+            if (box.text != "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") nil();
+            text = "";
+            length = 0;
+        }
+    }
+    // Bounded strings avoid measuring ever-growing quadratic concatenation.
+    if (length == 0 and text != "") nil();
+    if (length > 0 and text == "") nil();
+}

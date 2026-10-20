@@ -7,3 +7,8 @@ edition = "2024"
 members = ["crates/rblox-vm"]
 
 [dependencies]
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"

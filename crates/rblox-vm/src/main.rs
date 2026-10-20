@@ -11,11 +11,20 @@ fn main() -> ExitCode {
     let mut vm = rblox_vm::VM::new();
     let args: Vec<String> = std::env::args().collect();
 
-    let result = match args.len() {
-        1 => repl(&mut vm),
-        2 => run_file(&mut vm, &args[1]),
+    let result = match &args[1..] {
+        [] => repl(&mut vm),
+        [flag] if flag == "--help" => {
+            println!(
+                "Usage: rblox-vm [path]\n       rblox-vm --profile path (requires --features profiling)"
+            );
+            return ExitCode::SUCCESS;
+        }
+        [path] if path != "--profile" => run_file(&mut vm, path),
+        [flag, path] if flag == "--profile" => run_profiled_file(&mut vm, path),
         _ => {
-            eprintln!("Usage: rblox-vm [path]");
+            eprintln!(
+                "Usage: rblox-vm [path]\n       rblox-vm --profile path (requires --features profiling)"
+            );
             return ExitCode::from(EX_USAGE);
         }
     };
@@ -24,6 +33,25 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => ExitCode::from(code),
     }
+}
+
+#[cfg(feature = "profiling")]
+fn run_profiled_file(vm: &mut rblox_vm::VM, path: &str) -> Result<(), u8> {
+    vm.set_profiling(true);
+    let result = run_file(vm, path);
+    // Partial profiles are useful when a script fails, too.
+    if let Some(profile) = vm.profile() {
+        eprint!("{profile}");
+    }
+    result
+}
+
+#[cfg(not(feature = "profiling"))]
+fn run_profiled_file(_vm: &mut rblox_vm::VM, _path: &str) -> Result<(), u8> {
+    eprintln!(
+        "Profiling requires: cargo run -p rblox-vm --bin rblox-vm --release --features profiling -- --profile path"
+    );
+    Err(EX_USAGE)
 }
 
 fn repl(vm: &mut rblox_vm::VM) -> Result<(), u8> {

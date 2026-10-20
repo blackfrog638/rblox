@@ -1,0 +1,26 @@
+// Exercises the field/method table workload from chapter 30.
+class Zoo {
+    init() {
+        this.aardvark = 1;
+        this.baboon = 2;
+        this.cat = 3;
+        this.donkey = 4;
+        this.elephant = 5;
+        this.fox = 6;
+    }
+    ant() { return this.aardvark; }
+    banana() { return this.baboon; }
+    tuna() { return this.cat; }
+    hay() { return this.donkey; }
+    grass() { return this.elephant; }
+    mouse() { return this.fox; }
+}
+var zoo = Zoo();
+fun bench(n) {
+    var sum = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        sum = sum + zoo.ant() + zoo.banana() + zoo.tuna()
+                  + zoo.hay() + zoo.grass() + zoo.mouse();
+    }
+    if (sum != 21 * n) nil();
+}

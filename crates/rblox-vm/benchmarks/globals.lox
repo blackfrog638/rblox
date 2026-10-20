@@ -1,0 +1,7 @@
+var total = 0;
+fun bench(n) {
+    for (var i = 0; i < n; i = i + 1) {
+        total = total + 1;
+    }
+    if (total != n) nil();
+}

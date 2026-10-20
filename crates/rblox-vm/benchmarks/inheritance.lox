@@ -1,0 +1,13 @@
+class Base { value() { return this.number; } }
+class Child < Base {
+    init() { this.number = 7; }
+    value() { return super.value(); }
+}
+fun bench(n) {
+    var child = Child();
+    var sum = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        sum = sum + child.value();
+    }
+    if (sum != 7 * n) nil();
+}

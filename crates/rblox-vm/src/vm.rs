@@ -44,6 +44,8 @@ pub struct VM {
     init_string: ObjId,
     trace_execution: bool,
     start_time: Instant,
+    #[cfg(feature = "profiling")]
+    profile: Option<crate::profiler::Profile>,
 }
 
 impl Default for VM {
@@ -67,6 +69,8 @@ impl VM {
             init_string,
             trace_execution: false,
             start_time: Instant::now(),
+            #[cfg(feature = "profiling")]
+            profile: None,
         };
         vm.define_native_function("clock", Self::clock_native);
         vm
@@ -83,6 +87,21 @@ impl VM {
 
     pub fn set_trace_execution(&mut self, enabled: bool) {
         self.trace_execution = enabled;
+    }
+
+    /// Enable/reset or disable instrumentation between runs.
+    #[cfg(feature = "profiling")]
+    pub fn set_profiling(&mut self, enabled: bool) {
+        assert!(
+            self.call_stack.is_empty(),
+            "change profiling only between runs"
+        );
+        self.profile = enabled.then(crate::profiler::Profile::default);
+    }
+
+    #[cfg(feature = "profiling")]
+    pub fn profile(&self) -> Option<&crate::profiler::Profile> {
+        self.profile.as_ref()
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), String> {
@@ -137,6 +156,10 @@ impl VM {
             }
 
             let instruction = self.read_byte()?;
+            #[cfg(feature = "profiling")]
+            if let Some(profile) = &mut self.profile {
+                profile.instruction(instruction);
+            }
             match instruction {
                 OP_CONSTANT => {
                     let constant = self.read_constant()?;
@@ -401,6 +424,10 @@ impl VM {
                         .pop()
                         .ok_or_else(|| self.runtime_error("No active call frame."))?;
                     self.stack.truncate(frame.stack_start);
+                    #[cfg(feature = "profiling")]
+                    if let Some(profile) = &mut self.profile {
+                        profile.exit();
+                    }
 
                     if self.call_stack.is_empty() {
                         return Ok(());
@@ -641,6 +668,10 @@ impl VM {
     }
 
     fn reset_stack(&mut self) {
+        #[cfg(feature = "profiling")]
+        if let Some(profile) = &mut self.profile {
+            profile.unwind();
+        }
         // Globals may retain closures even after a runtime error.
         // Preserve their captured variables before discarding the stack.
         let _ = self.close_upvalues(0);
@@ -672,6 +703,19 @@ impl VM {
     fn push_call_frame(&mut self, function: ObjId, stack_start: usize) -> Result<(), String> {
         if self.call_stack.len() >= FRAMES_MAX {
             return Err(self.runtime_error("Stack overflow."));
+        }
+        #[cfg(feature = "profiling")]
+        if let Some(profile) = &mut self.profile {
+            let Object::Closure(closure) = self.heap.get(function) else {
+                unreachable!("call frame requires a closure");
+            };
+            let Object::Function(prototype) = self.heap.get(closure.function) else {
+                unreachable!("closure requires a function prototype");
+            };
+            profile.enter(
+                closure.function,
+                prototype.name.as_deref().unwrap_or("<script>"),
+            );
         }
         self.call_stack.push(CallFrame {
             function,
@@ -875,6 +919,8 @@ impl VM {
     }
 
     pub fn collect_garbage(&mut self) {
+        #[cfg(feature = "profiling")]
+        let started = self.profile.as_ref().map(|_| Instant::now());
         crate::gc_log!(
             "begin: {} objects, {} managed bytes",
             self.heap.len(),
@@ -883,6 +929,10 @@ impl VM {
         self.mark_roots();
         self.heap.trace_references();
         self.heap.finish_collection();
+        #[cfg(feature = "profiling")]
+        if let (Some(profile), Some(started)) = (&mut self.profile, started) {
+            profile.collected(started.elapsed());
+        }
         crate::gc_log!(
             "end: {} objects, {} managed bytes",
             self.heap.len(),

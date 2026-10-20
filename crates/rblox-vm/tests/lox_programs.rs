@@ -29,6 +29,44 @@ fn run_program(source: &str) -> Output {
         .expect("run rblox-vm")
 }
 
+#[test]
+fn profiling_cli_preserves_stdout_and_requires_the_feature() {
+    let program = TempProgram::new("fun twice(n) { return n * 2; } print twice(21);");
+    let output = Command::new(env!("CARGO_BIN_EXE_rblox-vm"))
+        .arg("--profile")
+        .arg(&program.0)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    if cfg!(feature = "profiling") {
+        assert!(output.status.success(), "{stderr}");
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+        assert!(stderr.contains("Lox profile"), "{stderr}");
+        assert!(stderr.contains("twice"), "{stderr}");
+        assert!(stderr.contains("OP_MULTIPLY"), "{stderr}");
+    } else {
+        assert_eq!(output.status.code(), Some(64));
+        assert!(output.stdout.is_empty());
+        assert!(stderr.contains("--features profiling"), "{stderr}");
+    }
+}
+
+#[cfg(feature = "profiling")]
+#[test]
+fn profiling_cli_preserves_runtime_error_status_and_prints_partial_stats() {
+    let program = TempProgram::new("fun fail() { nil(); } fail();");
+    let output = Command::new(env!("CARGO_BIN_EXE_rblox-vm"))
+        .arg("--profile")
+        .arg(&program.0)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(70));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Can only call functions."), "{stderr}");
+    assert!(stderr.contains("Lox profile"), "{stderr}");
+    assert!(stderr.contains("fail"), "{stderr}");
+}
+
 #[cfg(feature = "debug-gc")]
 #[test]
 fn direct_method_calls_avoid_temporary_bound_method_allocations() {

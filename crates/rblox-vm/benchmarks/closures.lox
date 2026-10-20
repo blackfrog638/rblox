@@ -1,0 +1,16 @@
+fun counter() {
+    var count = 0;
+    fun increment() {
+        count = count + 1;
+        return count;
+    }
+    return increment;
+}
+fun bench(n) {
+    var next = counter();
+    var result = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        result = next();
+    }
+    if (result != n) nil();
+}

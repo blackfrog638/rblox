@@ -1,0 +1,7 @@
+fun bench(n) {
+    var sum = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        sum = sum + i;
+    }
+    if (sum != n * (n - 1) / 2) nil();
+}
