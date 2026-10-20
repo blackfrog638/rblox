@@ -1,9 +1,9 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
-    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_UPVALUE,
-    OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_SUPER,
+    OP_GET_UPVALUE, OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
+    OP_METHOD, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_SUPER_INVOKE, OP_TRUE,
 };
 use crate::memory::Heap;
 
@@ -93,6 +93,7 @@ enum PrefixRule {
     Literal,
     Identifier,
     This,
+    Super,
 }
 
 enum InfixRule {
@@ -208,6 +209,11 @@ fn get_rule(kind: TokenKind) -> ParseRule {
             infix: None,
             precedence: Precedence::None,
         },
+        TokenKind::Super => ParseRule {
+            prefix: Some(PrefixRule::Super),
+            infix: None,
+            precedence: Precedence::None,
+        },
         TokenKind::Dot => ParseRule {
             prefix: None,
             infix: Some(InfixRule::Dot),
@@ -292,7 +298,9 @@ impl<'a> Compiler<'a> {
     }
 }
 
-struct ClassCompiler;
+struct ClassCompiler {
+    has_superclass: bool,
+}
 
 struct Parser<'a, 'h> {
     heap: &'h mut Heap,
@@ -355,9 +363,14 @@ impl<'a, 'h> Parser<'a, 'h> {
     }
 
     fn class_declaration(&mut self) -> Result<(), String> {
-        self.classes.push(ClassCompiler);
+        self.classes.push(ClassCompiler {
+            has_superclass: false,
+        });
         let result = self.compile_class();
-        self.classes.pop();
+        let class = self.classes.pop().expect("class compiler must exist");
+        if class.has_superclass {
+            self.end_scope();
+        }
         result
     }
 
@@ -386,9 +399,19 @@ impl<'a, 'h> Parser<'a, 'h> {
                 return Err("Compile error: A class can't inherit from itself.".to_string());
             }
             self.named_variable(superclass.lexeme.to_string(), false)?;
+            self.begin_scope();
+            self.classes
+                .last_mut()
+                .expect("class compiler must exist")
+                .has_superclass = true;
+            self.declare_local(Token {
+                kind: TokenKind::Identifier,
+                lexeme: "super",
+                line: superclass.line,
+            })?;
+            self.mark_initialized();
             self.named_variable(name.lexeme.to_string(), false)?;
             self.emit(OP_INHERIT);
-            self.emit(OP_POP);
         }
 
         self.named_variable(name.lexeme.to_string(), false)?;
@@ -916,6 +939,7 @@ impl<'a, 'h> Parser<'a, 'h> {
             PrefixRule::String => self.parse_string()?,
             PrefixRule::Identifier => self.parse_variable_expression(can_assign)?,
             PrefixRule::This => self.parse_this()?,
+            PrefixRule::Super => self.parse_super()?,
         }
 
         while precedence <= get_rule(self.peek().kind).precedence {
@@ -941,6 +965,36 @@ impl<'a, 'h> Parser<'a, 'h> {
             return Err("Compile error: Can't use 'this' outside of a class.".to_string());
         }
         self.parse_variable_expression(false)
+    }
+
+    fn parse_super(&mut self) -> Result<(), String> {
+        match self.classes.last() {
+            None => return Err("Compile error: Can't use 'super' outside of a class.".to_string()),
+            Some(class) if !class.has_superclass => {
+                return Err(
+                    "Compile error: Can't use 'super' in a class with no superclass.".to_string(),
+                );
+            }
+            Some(_) => {}
+        }
+        self.consume(TokenKind::Dot, "Expect '.' after 'super'.")?;
+        let name = self.consume_identifier("Expect superclass method name.")?;
+        let name = self.heap.alloc_string(name.lexeme.to_string());
+        let constant = self.current_chunk().add_constant(name);
+
+        self.named_variable("this".to_string(), false)?;
+        if self.match_token(TokenKind::LeftParen) {
+            let arg_count = self.argument_list()?;
+            self.named_variable("super".to_string(), false)?;
+            self.emit(OP_SUPER_INVOKE);
+            self.emit(constant);
+            self.emit(arg_count as u8);
+        } else {
+            self.named_variable("super".to_string(), false)?;
+            self.emit(OP_GET_SUPER);
+            self.emit(constant);
+        }
+        Ok(())
     }
 
     fn parse_dot(&mut self, can_assign: bool) -> Result<(), String> {

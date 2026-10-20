@@ -5,10 +5,10 @@ use crate::memory::{Heap, ObjId};
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
     OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY,
-    OP_GET_UPVALUE, OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
-    OP_METHOD, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN,
-    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
-    disassemble_instruction,
+    OP_GET_SUPER, OP_GET_UPVALUE, OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE,
+    OP_LESS, OP_LOOP, OP_METHOD, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT,
+    OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT,
+    OP_SUPER_INVOKE, OP_TRUE, disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue};
@@ -266,6 +266,15 @@ impl VM {
                     };
                     self.push(value);
                 }
+                OP_GET_SUPER => {
+                    let name = self.read_constant_string()?;
+                    let Value::Obj(superclass) = self.pop()? else {
+                        return Err(self.runtime_error("Superclass must be a class."));
+                    };
+                    let receiver = self.pop()?;
+                    let method = self.bind_method(superclass, name, receiver)?;
+                    self.push(method);
+                }
                 OP_SET_PROPERTY => {
                     let name = self.read_constant_string()?;
                     let value = self.pop()?;
@@ -431,6 +440,15 @@ impl VM {
                     let name = self.read_constant_string()?;
                     let arg_count = self.read_byte()? as usize;
                     self.invoke(name, arg_count)?;
+                }
+                OP_SUPER_INVOKE => {
+                    let name = self.read_constant_string()?;
+                    let arg_count = self.read_byte()? as usize;
+                    let Value::Obj(superclass) = self.pop()? else {
+                        return Err(self.runtime_error("Superclass must be a class."));
+                    };
+                    // Popping the lookup class leaves [receiver, args...] ready for the frame.
+                    self.invoke_from_class(superclass, name, arg_count)?;
                 }
                 OP_CLOSE_UPVALUE => {
                     let last = self

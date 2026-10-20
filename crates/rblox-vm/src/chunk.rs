@@ -37,6 +37,8 @@ pub const OP_SET_PROPERTY: u8 = 33;
 pub const OP_METHOD: u8 = 34;
 pub const OP_INVOKE: u8 = 35;
 pub const OP_INHERIT: u8 = 36;
+pub const OP_GET_SUPER: u8 = 37;
+pub const OP_SUPER_INVOKE: u8 = 38;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -128,6 +130,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
         OP_CONSTANT => constant_instruction(chunk, offset, &prefix, "OP_CONSTANT", heap),
         OP_CLASS => constant_instruction(chunk, offset, &prefix, "OP_CLASS", heap),
         OP_GET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_GET_PROPERTY", heap),
+        OP_GET_SUPER => constant_instruction(chunk, offset, &prefix, "OP_GET_SUPER", heap),
         OP_SET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_SET_PROPERTY", heap),
         OP_METHOD => constant_instruction(chunk, offset, &prefix, "OP_METHOD", heap),
         OP_INHERIT => (format!("{}OP_INHERIT", prefix), offset + 1),
@@ -221,7 +224,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
             (line, next_offset)
         }
         OP_CALL => byte_instruction(chunk, offset, &prefix, "OP_CALL"),
-        OP_INVOKE => invoke_instruction(chunk, offset, &prefix, heap),
+        OP_INVOKE => invoke_instruction(chunk, offset, &prefix, "OP_INVOKE", heap),
+        OP_SUPER_INVOKE => invoke_instruction(chunk, offset, &prefix, "OP_SUPER_INVOKE", heap),
         OP_CLOSURE => {
             let (mut text, mut next) =
                 constant_instruction(chunk, offset, &prefix, "OP_CLOSURE", heap);
@@ -301,8 +305,14 @@ fn constant_instruction(
     )
 }
 
-fn invoke_instruction(chunk: &Chunk, offset: usize, prefix: &str, heap: &Heap) -> (String, usize) {
-    let (text, next) = constant_instruction(chunk, offset, prefix, "OP_INVOKE", heap);
+fn invoke_instruction(
+    chunk: &Chunk,
+    offset: usize,
+    prefix: &str,
+    name: &str,
+    heap: &Heap,
+) -> (String, usize) {
+    let (text, next) = constant_instruction(chunk, offset, prefix, name, heap);
     if next == offset + 1 {
         return (text, next);
     }
