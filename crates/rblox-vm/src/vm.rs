@@ -5,9 +5,10 @@ use crate::memory::{Heap, ObjId};
 use crate::chunk::{
     Chunk, OP_ADD, OP_AND, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT,
     OP_DEFINE_GLOBAL, OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY,
-    OP_GET_UPVALUE, OP_GREATER, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
-    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
-    OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE, disassemble_instruction,
+    OP_GET_UPVALUE, OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP,
+    OP_METHOD, OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_OR, OP_POP, OP_PRINT, OP_RETURN,
+    OP_SET_GLOBAL, OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    disassemble_instruction,
 };
 use crate::compiler::compile;
 use crate::object::{Closure, NativeFn, ObjFunction, Object, Upvalue};
@@ -217,6 +218,23 @@ impl VM {
                         }
                         self.stack[location] = value;
                     }
+                }
+                OP_INHERIT => {
+                    let subclass = self.pop()?;
+                    let superclass = self
+                        .stack
+                        .last()
+                        .copied()
+                        .ok_or_else(|| self.runtime_error("Stack underflow."))?;
+                    let Value::Obj(superclass) = superclass else {
+                        return Err(self.runtime_error("Superclass must be a class."));
+                    };
+                    let Value::Obj(subclass) = subclass else {
+                        return Err(self.runtime_error("Subclass must be a class."));
+                    };
+                    self.heap
+                        .inherit_methods(superclass, subclass)
+                        .map_err(|error| self.runtime_error(error))?;
                 }
                 OP_NIL => self.push(Value::Nil),
                 OP_TRUE => self.push(Value::Bool(true)),

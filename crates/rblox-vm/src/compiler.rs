@@ -1,9 +1,9 @@
 use crate::chunk::{
     Chunk, OP_ADD, OP_CALL, OP_CLASS, OP_CLOSE_UPVALUE, OP_CLOSURE, OP_CONSTANT, OP_DEFINE_GLOBAL,
     OP_DIVIDE, OP_EQUAL, OP_FALSE, OP_GET_GLOBAL, OP_GET_LOCAL, OP_GET_PROPERTY, OP_GET_UPVALUE,
-    OP_GREATER, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD, OP_MULTIPLY,
-    OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL, OP_SET_LOCAL,
-    OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
+    OP_GREATER, OP_INHERIT, OP_INVOKE, OP_JUMP, OP_JUMP_IF_FALSE, OP_LESS, OP_LOOP, OP_METHOD,
+    OP_MULTIPLY, OP_NEGATE, OP_NIL, OP_NOT, OP_POP, OP_PRINT, OP_RETURN, OP_SET_GLOBAL,
+    OP_SET_LOCAL, OP_SET_PROPERTY, OP_SET_UPVALUE, OP_SUBTRACT, OP_TRUE,
 };
 use crate::memory::Heap;
 
@@ -378,6 +378,17 @@ impl<'a, 'h> Parser<'a, 'h> {
             self.define_variable(global);
         } else {
             self.mark_initialized();
+        }
+
+        if self.match_token(TokenKind::Less) {
+            let superclass = self.consume_identifier("Expect superclass name.")?;
+            if name.lexeme == superclass.lexeme {
+                return Err("Compile error: A class can't inherit from itself.".to_string());
+            }
+            self.named_variable(superclass.lexeme.to_string(), false)?;
+            self.named_variable(name.lexeme.to_string(), false)?;
+            self.emit(OP_INHERIT);
+            self.emit(OP_POP);
         }
 
         self.named_variable(name.lexeme.to_string(), false)?;

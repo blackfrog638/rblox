@@ -126,6 +126,34 @@ impl Heap {
         })
     }
 
+    pub(crate) fn inherit_methods(
+        &mut self,
+        superclass: ObjId,
+        subclass: ObjId,
+    ) -> Result<(), &'static str> {
+        if !matches!(self.get(superclass), Object::Class { .. }) {
+            return Err("Superclass must be a class.");
+        }
+        let Object::Class { methods, .. } = self.get_mut(subclass) else {
+            return Err("Subclass must be a class.");
+        };
+        // GC only runs between instructions, after this table has been restored.
+        let mut inherited = std::mem::take(methods);
+        let old_capacity = inherited.capacity();
+        let Object::Class { methods, .. } = self.get(superclass) else {
+            unreachable!("superclass was checked above")
+        };
+        inherited.add_all(methods, self);
+        self.bytes_allocated = self.bytes_allocated.saturating_add(
+            (inherited.capacity() - old_capacity) * std::mem::size_of::<crate::table::Entry>(),
+        );
+        let Object::Class { methods, .. } = self.get_mut(subclass) else {
+            unreachable!("subclass was checked above")
+        };
+        *methods = inherited;
+        Ok(())
+    }
+
     fn set_object_table_entry(
         &mut self,
         object: ObjId,
@@ -316,6 +344,56 @@ impl Default for Heap {
 mod tests {
     use super::*;
     use crate::object::{Closure, ObjFunction, Upvalue};
+
+    #[test]
+    fn inheritance_shares_closures_accounts_for_growth_and_does_not_retain_the_parent() {
+        let mut heap = Heap::new();
+        let parent = heap.alloc(Object::Class {
+            name: "Parent".into(),
+            methods: Table::new(),
+        });
+        let child = heap.alloc(Object::Class {
+            name: "Child".into(),
+            methods: Table::new(),
+        });
+        let function = heap.alloc(Object::Function(ObjFunction::new()));
+        let closure = heap.alloc(Object::Closure(Closure {
+            function,
+            upvalues: Vec::new(),
+        }));
+        let mut names = Vec::new();
+        for index in 0..40 {
+            let Value::Obj(name) = heap.alloc_string(format!("method{index}")) else {
+                unreachable!()
+            };
+            heap.set_class_method(parent, name, Value::Obj(closure))
+                .unwrap();
+            names.push(name);
+        }
+        let objects_before = heap.len();
+        let bytes_before = heap.bytes_allocated();
+        heap.inherit_methods(parent, child).unwrap();
+        assert_eq!(heap.len(), objects_before);
+        let Object::Class { methods, .. } = heap.get(child) else {
+            unreachable!()
+        };
+        assert_eq!(methods.len(), 40);
+        assert_eq!(
+            heap.bytes_allocated(),
+            bytes_before + methods.capacity() * std::mem::size_of::<crate::table::Entry>()
+        );
+
+        heap.mark_roots([Value::Obj(child)]);
+        heap.trace_references();
+        heap.finish_collection();
+        assert_eq!(heap.len(), objects_before - 1);
+        let Object::Class { methods, .. } = heap.get(child) else {
+            unreachable!()
+        };
+        for name in names {
+            assert_eq!(methods.get(&name, &heap), Some(&Value::Obj(closure)));
+        }
+    }
 
     #[test]
     fn field_table_growth_is_accounted_for_before_collection() {

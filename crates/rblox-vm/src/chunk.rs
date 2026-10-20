@@ -36,6 +36,7 @@ pub const OP_GET_PROPERTY: u8 = 32;
 pub const OP_SET_PROPERTY: u8 = 33;
 pub const OP_METHOD: u8 = 34;
 pub const OP_INVOKE: u8 = 35;
+pub const OP_INHERIT: u8 = 36;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineRun {
@@ -129,6 +130,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, heap: &Heap) -> (St
         OP_GET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_GET_PROPERTY", heap),
         OP_SET_PROPERTY => constant_instruction(chunk, offset, &prefix, "OP_SET_PROPERTY", heap),
         OP_METHOD => constant_instruction(chunk, offset, &prefix, "OP_METHOD", heap),
+        OP_INHERIT => (format!("{}OP_INHERIT", prefix), offset + 1),
         OP_NIL => {
             let line = format!("{}{}", prefix, simple_instruction("OP_NIL"));
             (line, offset + 1)

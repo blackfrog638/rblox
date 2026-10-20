@@ -132,6 +132,14 @@ impl Table {
         is_new_key
     }
 
+    pub(crate) fn add_all(&mut self, source: &Self, heap: &Heap) {
+        for entry in &source.entries {
+            if let (Some(key), Some(value)) = (entry.key, entry.value) {
+                self.set(key, value, heap);
+            }
+        }
+    }
+
     pub fn delete(&mut self, key: &ObjId, heap: &Heap) -> bool {
         let Some(index) = self.find_entry(key, heap) else {
             return false;
@@ -236,6 +244,29 @@ mod tests {
             Value::Obj(object) => object,
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn add_all_copies_live_entries_and_leaves_the_source_independent() {
+        let mut heap = Heap::new();
+        let answer = key("answer", &mut heap);
+        let nil = key("nil", &mut heap);
+        let removed = key("removed", &mut heap);
+        let mut source = Table::new();
+        source.set(answer, Value::Number(42.0), &heap);
+        source.set(nil, Value::Nil, &heap);
+        source.set(removed, Value::Number(99.0), &heap);
+        source.delete(&removed, &heap);
+        let mut destination = Table::new();
+        destination.set(answer, Value::Number(0.0), &heap);
+        destination.add_all(&source, &heap);
+
+        assert_eq!(destination.len(), 2);
+        assert_eq!(destination.get(&answer, &heap), Some(&Value::Number(42.0)));
+        assert_eq!(destination.get(&nil, &heap), Some(&Value::Nil));
+        assert_eq!(destination.get(&removed, &heap), None);
+        destination.set(answer, Value::Number(7.0), &heap);
+        assert_eq!(source.get(&answer, &heap), Some(&Value::Number(42.0)));
     }
 
     #[test]
