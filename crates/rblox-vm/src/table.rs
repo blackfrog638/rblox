@@ -80,7 +80,8 @@ impl Table {
             return None;
         }
 
-        let mut index = (hash as usize) % self.entries.len();
+        let mask = self.entries.len() - 1;
+        let mut index = (hash as usize) & mask;
         loop {
             let entry = &self.entries[index];
             match &entry.key {
@@ -95,7 +96,7 @@ impl Table {
                 }
                 Some(_) => {}
             }
-            index = (index + 1) % self.entries.len();
+            index = (index + 1) & mask;
         }
     }
 
@@ -165,7 +166,8 @@ impl Table {
         }
 
         let object = heap.get(*key);
-        let mut index = (object.string_hash()? as usize) % self.entries.len();
+        let mask = self.entries.len() - 1;
+        let mut index = (object.string_hash()? as usize) & mask;
         let value = object.string_value();
         loop {
             let entry = &self.entries[index];
@@ -177,14 +179,15 @@ impl Table {
                 }
                 Some(_) => {}
             }
-            index = (index + 1) % self.entries.len();
+            index = (index + 1) & mask;
         }
     }
 
     fn find_insert_index(&self, key: &ObjId, heap: &Heap) -> usize {
         let object = heap.get(*key);
-        let mut index = (object.string_hash().expect("Table keys must be strings.") as usize)
-            % self.entries.len();
+        let mask = self.entries.len() - 1;
+        let mut index =
+            (object.string_hash().expect("Table keys must be strings.") as usize) & mask;
         let value = object.string_value();
         let mut tombstone = None;
 
@@ -200,7 +203,7 @@ impl Table {
                 }
                 Some(_) => {}
             }
-            index = (index + 1) % self.entries.len();
+            index = (index + 1) & mask;
         }
     }
 
@@ -244,6 +247,113 @@ mod tests {
             Value::Obj(object) => object,
             _ => unreachable!(),
         }
+    }
+
+    fn colliding_keys(heap: &mut Heap, capacity: usize, count: usize) -> Vec<ObjId> {
+        (0..)
+            .map(|index| format!("collision-{index}"))
+            // Use modulo as an independent oracle for the expected starting slot.
+            .filter(|text| crate::hash_string(text) as usize % capacity == capacity - 1)
+            .take(count)
+            .map(|text| key(&text, heap))
+            .collect()
+    }
+
+    #[test]
+    fn collisions_wrap_and_probe_past_tombstones_for_lookup_update_and_interning() {
+        for capacity in [8, 16, 64] {
+            let mut heap = Heap::new();
+            let keys = colliding_keys(&mut heap, capacity, 6);
+            let mut table = Table::new();
+            table.adjust_capacity(capacity, &heap);
+            for (index, key) in keys[..4].iter().enumerate() {
+                assert!(table.set(*key, Value::Number(index as f64), &heap));
+            }
+            assert_eq!(table.entries[capacity - 1].key, Some(keys[0]));
+            assert_eq!(table.entries[0].key, Some(keys[1]));
+            assert_eq!(table.entries[1].key, Some(keys[2]));
+
+            assert!(table.delete(&keys[1], &heap));
+            for (index, key) in keys[..4]
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != 1)
+            {
+                assert_eq!(table.get(key, &heap), Some(&Value::Number(index as f64)));
+                let text = heap.get(*key).string_value().unwrap();
+                assert_eq!(
+                    table.find_string(text, crate::hash_string(text), &heap),
+                    Some(*key)
+                );
+            }
+            // Updating after a tombstone must find the existing key, not duplicate it.
+            assert!(!table.set(keys[3], Value::Number(99.0), &heap));
+            assert_eq!(table.len(), 3);
+            assert_eq!(table.get(&keys[3], &heap), Some(&Value::Number(99.0)));
+            assert!(table.set(keys[4], Value::Nil, &heap));
+            assert_eq!(table.entries[0].key, Some(keys[4]));
+            assert_eq!(table.len(), 4);
+            assert_eq!(table.get(&keys[4], &heap), Some(&Value::Nil));
+
+            for missing in [keys[1], keys[5]] {
+                assert_eq!(table.get(&missing, &heap), None);
+                let text = heap.get(missing).string_value().unwrap();
+                assert_eq!(
+                    table.find_string(text, crate::hash_string(text), &heap),
+                    None
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tombstone_cleanup_growth_and_clear_preserve_probing_invariants() {
+        let mut heap = Heap::new();
+        let keys = colliding_keys(&mut heap, 8, 80);
+        let mut table = Table::new();
+        table.adjust_capacity(8, &heap);
+        for (index, key) in keys[..6].iter().enumerate() {
+            table.set(*key, Value::Number(index as f64), &heap);
+        }
+        for key in &keys[..4] {
+            assert!(table.delete(key, &heap));
+        }
+        // Occupied slots reach the load threshold, but live entries still fit.
+        table.set(keys[6], Value::Number(6.0), &heap);
+        assert_eq!(table.capacity(), 8);
+        assert_eq!(table.count, 3);
+        assert_eq!(table.len(), 3);
+
+        for (index, key) in keys.iter().enumerate().skip(7) {
+            table.set(*key, Value::Number(index as f64), &heap);
+            assert!(table.capacity().is_power_of_two());
+        }
+        assert!(table.capacity() >= 128);
+        for (index, key) in keys.iter().enumerate().skip(4) {
+            assert_eq!(table.get(key, &heap), Some(&Value::Number(index as f64)));
+            let text = heap.get(*key).string_value().unwrap();
+            assert_eq!(
+                table.find_string(text, crate::hash_string(text), &heap),
+                Some(*key)
+            );
+        }
+        for key in &keys[..4] {
+            assert_eq!(table.get(key, &heap), None);
+        }
+
+        table.clear();
+        assert_eq!(table.capacity(), 0);
+        assert!(table.is_empty());
+        assert_eq!(table.get(&keys[0], &heap), None);
+        let text = heap.get(keys[0]).string_value().unwrap();
+        assert_eq!(
+            table.find_string(text, crate::hash_string(text), &heap),
+            None
+        );
+        assert!(!table.delete(&keys[0], &heap));
+        assert!(table.set(keys[0], Value::Nil, &heap));
+        assert!(table.capacity().is_power_of_two());
+        assert_eq!(table.get(&keys[0], &heap), Some(&Value::Nil));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Benchmark 与 profiler
 
 这一套工具用于第 30 章优化前后的测量。benchmark 回答“同样的工作快了多少”，
-profiler 回答“工作发生在哪里”。目前没有修改哈希表算法或 Value 表示。
+profiler 回答“工作发生在哪里”。哈希表探测优化的实现与测量记录见第 4 节。
 
 ## 1. 建立基线
 
@@ -135,6 +135,7 @@ WPR 会录制系统 CPU 活动，分析时需过滤目标进程。录制包含�
 ## 参考
 
 - [Crafting Interpreters：Measuring Performance](https://craftinginterpreters.com/optimization.html#measuring-performance)
+- [Crafting Interpreters：Faster Hash Table Probing](https://craftinginterpreters.com/optimization.html#faster-hash-table-probing)
 - [Cargo：构建 profiles](https://doc.rust-lang.org/cargo/reference/profiles.html)
 - [Microsoft：WPR 命令行选项](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options)
 - [Microsoft：WPR/WPA 分析流程](https://learn.microsoft.com/en-us/troubleshoot/windows-server/support-tools/support-tools-xperf-wpa-wpr)
